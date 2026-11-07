@@ -43,21 +43,28 @@ The initial baseline establishes:
 
 ---
 
-## 4. Current Foundation Controls
+## 4. Current Foundation & Phase 2 Implemented Controls
 
 - [x] **Environment Secrets Management**: Credentials stored strictly in `.env` files; excluded from Git via `.gitignore`.
 - [x] **HTTP Header Hardening**: Helmet middleware integrated to enforce CSP, HSTS, X-Content-Type-Options, etc.
 - [x] **CORS Isolation**: Explicit origin configuration restricting frontend API access to authorized origin (`CLIENT_ORIGIN`).
 - [x] **Sanitized Error Responses**: Central error middleware captures unexpected exceptions, logs internally, and returns uniform non-leaking JSON responses.
 - [x] **Parameterized Database Queries**: Node PostgreSQL driver (`pg`) connection pool with query parameterization.
+- [x] **FORCE Row-Level Security (RLS)**: Enforced across all tables in `public` with non-recursive security helpers.
+- [x] **Two-Phase Single-Use HMAC Identity Assertions**: Pre-consumed in dedicated committed transaction surviving financial rollbacks.
+- [x] **Real-Time Database Role & Suspension Checks**: Rejects deactivated users and stale JWT roles in real time.
+- [x] **Atomic Double-Entry Ledger**: Exactly 2 balanced postings per posted transaction, integer paise only, append-only triggers.
+- [x] **Deferred Commit Validator & Balance Reconciliation**: Re-reads final row state and reconciles cached balance against posting sum under lock.
+- [x] **Parent Account Row Locking**: Serializes membership modifications and account status changes, preventing final holder revocation.
+- [x] **Deterministic Ascending UUID Locking**: Eliminates deadlocks on concurrent opposite-direction transfers.
+- [x] **Full Idempotency Protection**: Unique transaction binding, method/path/payload validation, and cached exact replay.
 
 ---
 
-## 5. Security Checklist for Subsequent Iterations
+## 5. Security Checklist for Subsequent Iterations (Phase 3 & 4)
 
 - [ ] Rate limiting on API routes (`express-rate-limit`).
-- [ ] User authentication with hardened password hashing (Argon2id or bcrypt) and secure session/JWT management.
-- [ ] Role-Based Access Control (RBAC) middleware.
-- [ ] Double-entry ledger schema with balance invariants and audit trails.
-- [ ] CSRF protection for state-changing endpoints.
+- [ ] Hardware MFA / WebAuthn integration for administrative accounts.
+- [ ] CSRF protection for browser cookie sessions.
+- [ ] Automated range table partitioning by `created_at` for high-throughput scaling.
 

@@ -6,7 +6,7 @@ import { env } from '../config/env.js';
  * Prevents stack trace disclosure in production while returning standardized JSON.
  */
 export function errorHandler(err, req, res, next) { // eslint-disable-line no-unused-vars
-  const statusCode = err.statusCode || (res.statusCode >= 400 ? res.statusCode : 500);
+  const statusCode = err.status || err.statusCode || (res.statusCode >= 400 ? res.statusCode : 500);
 
   // Structured server log for observability
   console.error(`[Error] ${req.method} ${req.originalUrl}:`, {

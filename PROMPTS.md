@@ -116,3 +116,27 @@ Record this actual setup request in PROMPTS.md with its date. Do not invent futu
 Work incrementally and explain important decisions in beginner-friendly language. Do not move to the financial implementation until I review and approve this foundation.
 ```
 
+---
+
+## Prompt 2: Phase 2 Implementation Authorization & Delivery
+- **Date**: 2026-11-07
+- **Request**:
+```markdown
+# LedgerLine — Phase 2 Implementation Authorization
+
+You are now authorized to implement **Phase 2: Database Schema, Financial Integrity, Authentication Context, and Transaction Engine** for LedgerLine.
+
+The latest architectural specification is a starting point, NOT an unquestionable source of truth. Your first responsibility is to correct the remaining defects identified below. Do not blindly copy the SQL.
+
+## Mandatory architectural corrections
+- Assertion replay protection (two-phase committed registration + financial claim).
+- Complete RLS and ownership design (FORCE RLS, owner bypass, least-privileged ledgerline_app).
+- Correct account authorization (deposit destination holder/admin check, withdrawal source holder/admin, transfer source holder/admin, auditor read-only).
+- Complete idempotency and duplicate handling (unique tx binding, method/path/payload verification, exact cached replay).
+- Correct session-context cleanup (capture txid while active, delete by txid/pid post-commit/rollback).
+- Complete financial integrity (integer paise BIGINT, 2 balanced postings, append-only, deferred commit validator with balance reconciliation).
+- Complete missing definitions and executable automated test suite covering 25 test cases.
+```
+- **Implementation Status**: Completed and verified. All 7 migrations applied, System Vault and admin seeded, all 25 automated tests passed.
+
+

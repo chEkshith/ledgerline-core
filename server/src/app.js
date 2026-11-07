@@ -3,6 +3,9 @@ import helmet from 'helmet';
 import cors from 'cors';
 import { env } from './config/env.js';
 import healthRoutes from './routes/health.routes.js';
+import authRoutes from './routes/auth.routes.js';
+import accountRoutes from './routes/account.routes.js';
+import transactionRoutes from './routes/transaction.routes.js';
 import { notFoundHandler } from './middleware/notFoundHandler.js';
 import { errorHandler } from './middleware/errorHandler.js';
 
@@ -16,7 +19,7 @@ app.use(
   cors({
     origin: env.CLIENT_ORIGIN,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'Idempotency-Key', 'x-idempotency-key'],
     credentials: true,
   })
 );
@@ -27,6 +30,9 @@ app.use(express.urlencoded({ extended: true, limit: '10kb' }));
 
 // 4. API Routes
 app.use('/api/health', healthRoutes);
+app.use('/api/auth', authRoutes);
+app.use('/api/accounts', accountRoutes);
+app.use('/api/transactions', transactionRoutes);
 
 // 5. Root route for basic verification
 app.get('/', (req, res) => {

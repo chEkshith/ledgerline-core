@@ -3,11 +3,17 @@ node_modules/
 .pnp
 .pnp.js
 
-# Environment variables
+# Environment variables and secrets
 .env
 .env.local
 .env.*.local
+*.env
+**/.env
+server/.env
+client/.env
 !.env.example
+!server/.env.example
+!client/.env.example
 
 # Logs
 logs/

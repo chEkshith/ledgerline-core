@@ -126,6 +126,89 @@ CLIENT_ORIGIN=http://localhost:5173
 
 ---
 
+---
+
+## Database Migrations & Seeding (Phase 2)
+
+LedgerLine uses ordered, version-controlled SQL migration scripts located in `database/migrations/`:
+
+| Migration | Purpose |
+| :--- | :--- |
+| `001_schemas_roles_extensions.sql` | Establishes `ledgerline_owner`, schemas (`public`, `ledger_secure`), and `pgcrypto`. |
+| `002_core_tables_and_indexes.sql` | Core schema (users, accounts, memberships, transactions, postings, idempotency, audit). |
+| `003_rls_helpers_and_policies.sql` | Non-recursive security helpers, FORCE RLS, and explicit application policies. |
+| `004_integrity_triggers_and_deferred_validator.sql` | Balance maintenance, append-only triggers, and deferred commit validator with balance reconciliation. |
+| `005_auth_session_and_membership_procedures.sql` | Two-phase assertion lifecycle, user auth, account creation, and serialized membership management. |
+| `006_financial_engine_procedures.sql` | Deterministic account locking, deposit/withdrawal/transfer/reversal posting engine, and business refusals. |
+| `007_permissions_and_grants.sql` | Explicit least-privilege grants to `ledgerline_app` and function owner assignments. |
+
+### Run Migrations & Seed Data
+```bash
+# From project root:
+node server/scripts/migrate.js
+
+# Or from server directory:
+npm.cmd --prefix server run migrate
+```
+
+---
+
+## Automated Verification Suite
+
+Phase 2 includes a comprehensive 25-scenario automated test suite executing against the actual local PostgreSQL database:
+
+```bash
+# Execute Phase 2 test suite:
+npm.cmd --prefix server test
+```
+
+### Verified Scenarios:
+1. Successful deposit (Vault -> Customer Account).
+2. Successful withdrawal (Customer Account -> Vault).
+3. Successful transfer (Customer Account -> Customer Account).
+4. Insufficient-funds refusal (status=refused, 0 postings, HTTP 422).
+5. Frozen account refusal (refusal on frozen accounts).
+6. Unauthorized source account rejection.
+7. Unauthorized deposit destination rejection.
+8. Auditor role financial operation block.
+9. Exact idempotency replay (cached response + header).
+10. Idempotency payload mismatch (HTTP 409).
+11. Concurrent duplicate requests (exactly one transaction created).
+12. Concurrent withdrawals overdraw protection (balance non-negative).
+13. Opposite-direction transfers (deadlock-free via ascending UUID locking).
+14. Assertion replay rejection after commit.
+15. Assertion replay rejection after financial rollback.
+16. Stale or suspended user assertion rejection.
+17. Concurrent final account-holder revocation protection.
+18. Ledger posting append-only trigger protection.
+19. Finalized transaction posting immutability.
+20. Balance reconciliation verification across all accounts.
+21. Invalid reversal rejection (endpoint/amount tampering).
+22. Duplicate reversal rejection (single-reversal invariant).
+23. Pending transaction commit rejection (deferred trigger).
+24. Refused transaction zero postings verification.
+25. Session context cleanup after commit and rollback.
+
+---
+
+## API Endpoints Implemented
+
+| Method | Endpoint | Description | Auth Required |
+| :--- | :--- | :--- | :--- |
+| `GET` | `/api/health` | Service vitality and DB connection latency | No |
+| `POST`| `/api/auth/register` | Register customer account | No |
+| `POST`| `/api/auth/login` | Authenticate and obtain JWT | No |
+| `PATCH`| `/api/auth/status` | Suspend or reactivate user | Admin |
+| `POST`| `/api/accounts` | Create customer account (atomic with holder) | Bearer Token |
+| `GET` | `/api/accounts` | List caller's authorized accounts | Bearer Token |
+| `GET` | `/api/accounts/:id`| Get account balance and details | Bearer Token |
+| `PATCH`| `/api/accounts/:id/status` | Freeze (holder/admin), unfreeze or close (admin) | Bearer Token |
+| `POST`| `/api/accounts/:id/memberships` | Assign account holder (admin) or auditor (holder) | Bearer Token |
+| `DELETE`| `/api/accounts/:id/memberships/:userId` | Revoke membership (prevents last holder removal) | Bearer Token |
+| `POST`| `/api/transactions` | Execute deposit, withdrawal, transfer, or reversal | Bearer Token + Idempotency-Key |
+
+---
+
 ## Running the Application
 
 ### Start Backend Server (with Nodemon)
