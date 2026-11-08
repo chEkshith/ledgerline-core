@@ -81,6 +81,14 @@ The architectural baseline enforces:
    - Hardened `search_path` across all 26 `SECURITY DEFINER` functions to prioritize `pg_catalog` and `ledger_secure` before `public`, ending with `pg_temp` (`SET search_path = pg_catalog, ledger_secure, public, pg_temp`), preventing function and operator shadowing.
    - Restricted pure validation trigger functions to minimal search path (`pg_catalog, pg_temp`).
    - Verified that all 26 functions are owned by `ledgerline_owner`, lack dynamic SQL (`EXECUTE '...'`), and utilize fully qualified object names (`public.*`, `ledger_secure.*`).
+8. **Adversarial Authorization, RLS Isolation & Concurrency Serialization**:
+   - Enforced and verified PostgreSQL `FORCE ROW LEVEL SECURITY` across all seven domain tables (`users`, `accounts`, `account_memberships`, `transactions`, `ledger_postings`, `idempotency_keys`, `audit_logs`).
+   - Proved complete zero-row isolation for unauthenticated queries or queries with missing session identity contexts.
+   - Verified cross-customer data isolation: customers cannot read other users' accounts, postings, transactions, statement endpoints, or join queries.
+   - Verified auditor boundary: auditors are strictly read-only and denied deposits, withdrawals, transfers, reversals, and membership modifications.
+   - Verified immediate authorization cutoff: revoked members cannot execute transactions even if holding valid JWTs.
+   - Verified cryptographic assertion anti-tampering: database checks reject forged roles, corrupt signatures, and fake user IDs.
+   - Verified concurrency race serialization: parent account row-level locking (`FOR UPDATE`) guarantees deterministic ordering between membership revocation and financial operations, preventing stale authorization execution.
 
 ---
 

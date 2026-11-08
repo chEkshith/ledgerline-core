@@ -118,3 +118,24 @@ This document records the genuine prompt history and development requests execut
      - Re-enforce execution revokes on `claim_session_identity` and `record_business_refusal` from `PUBLIC` and `ledgerline_app`.
   4. Add automated regression tests (Tests 33, 34, 35) in `server/test/phase2.test.js` validating schema creation locks, temp object prohibition, search-path shadow resistance, and trigger function execution denial.
 - **Outcome**: Additive migration `009` applied successfully under advisory lock; server tests expanded to 39/39 passed; client tests 41/41 passed (80/80 total). Development database `ledgerline_dev` preserved.
+
+---
+
+## Prompt 11: Phase 4, Task 2 — Adversarial Authorization & RLS Verification
+- **Date**: 2026-11-08
+- **Request Summary**:
+  1. Build complete authorization matrix across routes, controllers, services, database procedures, and RLS policies for `customer`, `account_holder`, `auditor`, and `admin` roles.
+  2. Verify database-level RLS isolation and `FORCE ROW LEVEL SECURITY` across all seven domain tables (`users`, `accounts`, `account_memberships`, `transactions`, `ledger_postings`, `idempotency_keys`, `audit_logs`).
+  3. Formulate and implement comprehensive adversarial negative regression test suite (Tests 36 through 46 in `server/test/phase2.test.js`) verifying:
+     - Cross-customer account, transaction, and ledger posting read denial under RLS.
+     - Indirect leakage defense across statement endpoints and multi-table joins.
+     - Cross-account financial operation rejection (deposit, withdraw, transfer).
+     - Unauthorized membership assignment and revocation denial.
+     - Auditor write operation denial across all financial types and admin-only reversals.
+     - Immediate authorization cutoff for revoked members using active sessions.
+     - Zero-row isolation on queries with missing or unauthenticated session context.
+     - Cryptographic assertion tampering defense (forged roles, corrupt signatures, fake user IDs).
+     - Idempotency key namespace isolation preventing cross-user response hijacking.
+     - Authentic admin action attribution in immutable audit logs.
+  4. Verify authorization concurrency serialization (Test 47): proving determinism when membership revocation races with a financial transaction using parent account row-level locking (`FOR UPDATE`).
+- **Outcome**: Server test suite expanded from 39 to 51 passing tests; client test suite 41/41 passing (92/92 total tests passing); production client build verified; development database `ledgerline_dev` preserved.

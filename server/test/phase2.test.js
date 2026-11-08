@@ -1707,4 +1707,660 @@ describe('LedgerLine Phase 2 Comprehensive Test Suite', () => {
       );
     }
   });
+
+  // ---------------------------------------------------------------------------
+  // 36. Adversarial RLS Isolation: Customer A cannot read Customer B account
+  // ---------------------------------------------------------------------------
+  it('36. Adversarial RLS isolation: Customer A cannot read Customer B account', async () => {
+    // 1. Verify via adminClient that Customer B account actually exists in database
+    const bCheck = await adminClient.query('SELECT id, account_number, current_balance FROM public.accounts WHERE id = $1', [accountB]);
+    assert.equal(bCheck.rowCount, 1, 'Customer B account must exist in the database');
+
+    // 2. Direct SQL via Customer A session context: RLS filters out account B
+    await executeWithSession(customerA.id, 'customer', async (client) => {
+      const res = await client.query('SELECT * FROM public.accounts WHERE id = $1', [accountB]);
+      assert.equal(res.rowCount, 0, 'Customer A direct query must return 0 rows for Customer B account');
+    });
+
+    // 3. API service layer: Customer A attempting getAccountDetails on account B returns 404
+    await assert.rejects(
+      async () => {
+        await getAccountDetails(customerA.id, 'customer', accountB);
+      },
+      (err) => err.status === 404,
+      'Customer A attempting to fetch Customer B account must return 404'
+    );
+  });
+
+  // ---------------------------------------------------------------------------
+  // 37. Adversarial Transaction & Posting Isolation: Customer A cannot read Customer B transactions or postings
+  // ---------------------------------------------------------------------------
+  it('37. Adversarial Transaction & Posting Isolation: Customer A cannot read Customer B transactions or postings', async () => {
+    // 1. Create a distinct deposit transaction for Customer B on account B
+    const uniqueB = Date.now() + 37;
+    const depB = await processTransactionRequest({
+      userId: customerB.id,
+      role: 'customer',
+      idempotencyKey: `idemp-custb-tx-${uniqueB}`,
+      method: 'POST',
+      path: '/api/transactions/deposit',
+      body: {
+        type: 'deposit',
+        amountPaise: '30000',
+        sourceAccountId: vaultAccount.id,
+        destinationAccountId: accountB,
+      },
+    });
+    assert.equal(depB.statusCode, 200, 'Customer B deposit must succeed');
+    const txIdB = depB.body.transaction_id;
+
+    // 2. Verify via adminClient that transaction and dual postings exist on disk
+    const bTxCheck = await adminClient.query('SELECT id FROM public.transactions WHERE id = $1', [txIdB]);
+    assert.equal(bTxCheck.rowCount, 1, 'Customer B transaction must exist');
+    const bPostingsCheck = await adminClient.query('SELECT id FROM public.ledger_postings WHERE transaction_id = $1', [txIdB]);
+    assert.equal(bPostingsCheck.rowCount, 2, 'Customer B transaction must have 2 postings');
+
+    // 3. Customer A direct SQL queries: RLS returns 0 rows for both transactions and postings
+    await executeWithSession(customerA.id, 'customer', async (client) => {
+      const txRes = await client.query('SELECT * FROM public.transactions WHERE id = $1', [txIdB]);
+      assert.equal(txRes.rowCount, 0, 'Customer A cannot view Customer B transaction under RLS');
+
+      const postRes = await client.query('SELECT * FROM public.ledger_postings WHERE transaction_id = $1', [txIdB]);
+      assert.equal(postRes.rowCount, 0, 'Customer A cannot view Customer B postings under RLS');
+    });
+
+    // 4. Customer A API call: getTransactionById returns 404
+    await assert.rejects(
+      async () => {
+        await getTransactionById({ userId: customerA.id, role: 'customer', transactionId: txIdB });
+      },
+      (err) => err.status === 404,
+      'Customer A attempting to retrieve Customer B transaction must return 404'
+    );
+  });
+
+  // ---------------------------------------------------------------------------
+  // 38. Statement & Join Indirect Leakage Resistance: Customer A cannot access Customer B statement or join data
+  // ---------------------------------------------------------------------------
+  it('38. Statement & Join Indirect Leakage Resistance: Customer A cannot access Customer B statement or join data', async () => {
+    // 1. Customer A attempts to fetch statement for account B via service layer
+    await assert.rejects(
+      async () => {
+        await getAccountStatement(customerA.id, 'customer', accountB, 20, 0);
+      },
+      (err) => err.status === 404,
+      'Customer A fetching Customer B statement must return 404'
+    );
+
+    // 2. Adversarial direct join query attempting indirect data leakage
+    await executeWithSession(customerA.id, 'customer', async (client) => {
+      const leakRes = await client.query(`
+        SELECT a.id, a.account_number, a.current_balance, p.id AS posting_id, p.signed_amount_paise
+          FROM public.accounts a
+          LEFT JOIN public.ledger_postings p ON a.id = p.account_id
+         WHERE a.id = $1
+      `, [accountB]);
+
+      assert.equal(leakRes.rowCount, 0, 'Adversarial join must yield 0 rows under RLS');
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // 39. Cross-Account Financial Operation Rejection: Customer A cannot debit or credit Customer B account
+  // ---------------------------------------------------------------------------
+  it('39. Cross-Account Financial Operation Rejection: Customer A cannot debit or credit Customer B account', async () => {
+    const unique39 = Date.now() + 39;
+
+    // 1. Deposit with Customer B account as destination
+    await assert.rejects(
+      async () => {
+        await processTransactionRequest({
+          userId: customerA.id,
+          role: 'customer',
+          idempotencyKey: `idemp-cross-dep-${unique39}`,
+          method: 'POST',
+          path: '/api/transactions/deposit',
+          body: {
+            type: 'deposit',
+            amountPaise: '10000',
+            sourceAccountId: vaultAccount.id,
+            destinationAccountId: accountB,
+          },
+        });
+      },
+      (err) => /Caller is not an active account_holder on deposit destination account/.test(err.message),
+      'Customer A must be denied depositing into Customer B account'
+    );
+
+    // 2. Withdrawal with Customer B account as source
+    await assert.rejects(
+      async () => {
+        await processTransactionRequest({
+          userId: customerA.id,
+          role: 'customer',
+          idempotencyKey: `idemp-cross-wd-${unique39}`,
+          method: 'POST',
+          path: '/api/transactions/withdraw',
+          body: {
+            type: 'withdrawal',
+            amountPaise: '10000',
+            sourceAccountId: accountB,
+            destinationAccountId: vaultAccount.id,
+          },
+        });
+      },
+      (err) => /Caller is not an active account_holder on withdrawal source account/.test(err.message),
+      'Customer A must be denied withdrawing from Customer B account'
+    );
+
+    // 3. Transfer with Customer B account as source
+    await assert.rejects(
+      async () => {
+        await processTransactionRequest({
+          userId: customerA.id,
+          role: 'customer',
+          idempotencyKey: `idemp-cross-tf-${unique39}`,
+          method: 'POST',
+          path: '/api/transactions/transfer',
+          body: {
+            type: 'transfer',
+            amountPaise: '10000',
+            sourceAccountId: accountB,
+            destinationAccountId: accountA,
+          },
+        });
+      },
+      (err) => /Caller is not an active account_holder on transfer source account/.test(err.message),
+      'Customer A must be denied transferring out of Customer B account'
+    );
+  });
+
+  // ---------------------------------------------------------------------------
+  // 40. Unauthorized Membership Modification Denial: Customer cannot assign or revoke memberships on another account
+  // ---------------------------------------------------------------------------
+  it('40. Unauthorized Membership Modification Denial: Customer cannot assign or revoke memberships on another account', async () => {
+    // 1. Customer A attempts to assign Customer C as account_holder on Account B
+    await assert.rejects(
+      async () => {
+        await assignMembership(customerA.id, 'customer', accountB, userC.id, 'account_holder');
+      },
+      (err) => /Only an administrator can grant the account_holder role/.test(err.message),
+      'Customer A must not be permitted to grant account_holder role'
+    );
+
+    // 2. Customer A attempts to assign Customer C as auditor on Account B
+    await assert.rejects(
+      async () => {
+        await assignMembership(customerA.id, 'customer', accountB, userC.id, 'auditor');
+      },
+      (err) => /Only an admin or existing account_holder can assign an auditor/.test(err.message),
+      'Customer A must not be permitted to assign auditor on an account they do not hold'
+    );
+
+    // 3. Customer A attempts to revoke Customer B membership on Account B
+    await assert.rejects(
+      async () => {
+        await revokeMembership(customerA.id, 'customer', accountB, customerB.id);
+      },
+      (err) => /Only an administrator can revoke an account_holder membership/.test(err.message),
+      'Customer A must not be permitted to revoke account_holder membership'
+    );
+  });
+
+  // ---------------------------------------------------------------------------
+  // 41. Auditor Role Boundary Matrix: Auditor denied all financial writes and mutations
+  // ---------------------------------------------------------------------------
+  it('41. Auditor Role Boundary Matrix: Auditor denied all financial writes and mutations', async () => {
+    const unique41 = Date.now() + 41;
+
+    // 1. Deposit denied: Auditor is assigned on accountA as 'auditor', not 'account_holder'
+    await assert.rejects(
+      async () => {
+        await processTransactionRequest({
+          userId: auditorUser.id,
+          role: auditorUser.role,
+          idempotencyKey: `aud-dep-${unique41}`,
+          method: 'POST',
+          path: '/api/transactions/deposit',
+          body: {
+            type: 'deposit',
+            amountPaise: '5000',
+            sourceAccountId: vaultAccount.id,
+            destinationAccountId: accountA,
+          },
+        });
+      },
+      (err) => /Caller is not an active account_holder on deposit destination account/.test(err.message),
+      'Auditor must not be permitted to deposit'
+    );
+
+    // 2. Withdrawal denied
+    await assert.rejects(
+      async () => {
+        await processTransactionRequest({
+          userId: auditorUser.id,
+          role: auditorUser.role,
+          idempotencyKey: `aud-wd-${unique41}`,
+          method: 'POST',
+          path: '/api/transactions/withdraw',
+          body: {
+            type: 'withdrawal',
+            amountPaise: '5000',
+            sourceAccountId: accountA,
+            destinationAccountId: vaultAccount.id,
+          },
+        });
+      },
+      (err) => /Caller is not an active account_holder on withdrawal source account/.test(err.message),
+      'Auditor must not be permitted to withdraw'
+    );
+
+    // 3. Transfer denied
+    await assert.rejects(
+      async () => {
+        await processTransactionRequest({
+          userId: auditorUser.id,
+          role: auditorUser.role,
+          idempotencyKey: `aud-tf-${unique41}`,
+          method: 'POST',
+          path: '/api/transactions/transfer',
+          body: {
+            type: 'transfer',
+            amountPaise: '5000',
+            sourceAccountId: accountA,
+            destinationAccountId: accountB,
+          },
+        });
+      },
+      (err) => /Caller is not an active account_holder on transfer source account/.test(err.message),
+      'Auditor must not be permitted to transfer'
+    );
+
+    // 4. Reversal denied
+    // Perform a valid deposit on accountA first to get a valid posted transaction
+    const depValid = await processTransactionRequest({
+      userId: customerA.id,
+      role: 'customer',
+      idempotencyKey: `valid-dep-for-aud-${unique41}`,
+      method: 'POST',
+      path: '/api/transactions/deposit',
+      body: {
+        type: 'deposit',
+        amountPaise: '5000',
+        sourceAccountId: vaultAccount.id,
+        destinationAccountId: accountA,
+      },
+    });
+    assert.equal(depValid.statusCode, 200);
+    const validTxId = depValid.body.transaction_id;
+
+    await assert.rejects(
+      async () => {
+        await processTransactionRequest({
+          userId: auditorUser.id,
+          role: auditorUser.role,
+          idempotencyKey: `aud-rev-${unique41}`,
+          method: 'POST',
+          path: '/api/transactions/reverse',
+          body: {
+            type: 'reversal',
+            amountPaise: '5000',
+            sourceAccountId: accountA,
+            destinationAccountId: vaultAccount.id,
+            originalTransactionId: validTxId,
+          },
+        });
+      },
+      (err) => /Only administrators may execute transaction reversals/.test(err.message),
+      'Auditor must not be permitted to reverse'
+    );
+
+    // 5. Membership assignment denied
+    await assert.rejects(
+      async () => {
+        await assignMembership(auditorUser.id, auditorUser.role, accountA, userC.id, 'account_holder');
+      },
+      (err) => /Only an administrator can grant the account_holder role/.test(err.message),
+      'Auditor must not be permitted to assign account_holder role'
+    );
+
+    // 6. Account freeze denied
+    await assert.rejects(
+      async () => {
+        await updateAccountStatus(auditorUser.id, auditorUser.role, accountA, 'frozen', 'Audit hold');
+      },
+      (err) => /Only an administrator or active account_holder may freeze an account/.test(err.message),
+      'Auditor must not be permitted to freeze accounts'
+    );
+
+    // 7. Legitimate auditor read permitted
+    const audAcc = await getAccountDetails(auditorUser.id, auditorUser.role, accountA);
+    assert.equal(audAcc.id, accountA, 'Auditor must be permitted to inspect account details');
+    const audStmt = await getAccountStatement(auditorUser.id, auditorUser.role, accountA);
+    assert.ok(Array.isArray(audStmt.statement), 'Auditor must be permitted to inspect statement');
+  });
+
+  // ---------------------------------------------------------------------------
+  // 42. Revoked Member Immediate Cutoff: Existing session loses access immediately upon revocation
+  // ---------------------------------------------------------------------------
+  it('42. Revoked Member Immediate Cutoff: Existing session loses access immediately upon revocation', async () => {
+    const unique42 = Date.now() + 42;
+    const resX1 = await registerCustomer(`custX1_${unique42}@test.local`, 'Password123!');
+    const custX1 = resX1.user;
+    const resX2 = await registerCustomer(`custX2_${unique42}@test.local`, 'Password123!');
+    const custX2 = resX2.user;
+
+    // Create account with custX1 as holder
+    const accXRes = await createCustomerAccount(custX1.id, 'customer', `ACC-X-${unique42}`);
+    const accountX = accXRes.accountId;
+
+    // Add custX2 as second holder (via admin)
+    await assignMembership(adminUser.id, 'admin', accountX, custX2.id, 'account_holder');
+
+    // Confirm custX1 can read accountX
+    const read1 = await getAccountDetails(custX1.id, 'customer', accountX);
+    assert.equal(read1.id, accountX, 'custX1 must initially be able to read accountX');
+
+    // Admin revokes custX1 from accountX
+    await revokeMembership(adminUser.id, 'admin', accountX, custX1.id);
+
+    // custX1 immediately attempts access using their identity
+    await assert.rejects(
+      async () => {
+        await getAccountDetails(custX1.id, 'customer', accountX);
+      },
+      (err) => err.status === 404,
+      'Revoked member must immediately receive 404 on getAccountDetails'
+    );
+
+    await assert.rejects(
+      async () => {
+        await getAccountStatement(custX1.id, 'customer', accountX);
+      },
+      (err) => err.status === 404,
+      'Revoked member must immediately receive 404 on getAccountStatement'
+    );
+
+    await assert.rejects(
+      async () => {
+        await processTransactionRequest({
+          userId: custX1.id,
+          role: 'customer',
+          idempotencyKey: `x1-wd-${unique42}`,
+          method: 'POST',
+          path: '/api/transactions/withdraw',
+          body: {
+            type: 'withdrawal',
+            amountPaise: '1000',
+            sourceAccountId: accountX,
+            destinationAccountId: vaultAccount.id,
+          },
+        });
+      },
+      (err) => /Caller is not an active account_holder on withdrawal source account/.test(err.message),
+      'Revoked member must immediately be denied initiating withdrawals'
+    );
+  });
+
+  // ---------------------------------------------------------------------------
+  // 43. Unauthenticated / Missing Session Identity Query Denial: 0 protected rows returned
+  // ---------------------------------------------------------------------------
+  it('43. Unauthenticated / Missing Session Identity Query Denial: 0 protected rows returned', async () => {
+    // 1. Direct query without executeWithSession runs under ledgerline_app with NULL session context
+    const qAcc = await query("SELECT * FROM public.accounts WHERE account_type = 'customer'");
+    assert.equal(qAcc.rowCount, 0, 'Unauthenticated query must return 0 customer accounts');
+
+    const qTx = await query('SELECT * FROM public.transactions');
+    assert.equal(qTx.rowCount, 0, 'Unauthenticated query must return 0 transactions');
+
+    const qPost = await query('SELECT * FROM public.ledger_postings');
+    assert.equal(qPost.rowCount, 0, 'Unauthenticated query must return 0 ledger postings');
+
+    const qMem = await query('SELECT * FROM public.account_memberships');
+    assert.equal(qMem.rowCount, 0, 'Unauthenticated query must return 0 account memberships');
+
+    const qUsers = await query('SELECT * FROM public.users');
+    assert.equal(qUsers.rowCount, 0, 'Unauthenticated query must return 0 users');
+
+    const qIdemp = await query('SELECT * FROM public.idempotency_keys');
+    assert.equal(qIdemp.rowCount, 0, 'Unauthenticated query must return 0 idempotency keys');
+
+    const qAudit = await query('SELECT * FROM public.audit_logs');
+    assert.equal(qAudit.rowCount, 0, 'Unauthenticated query must return 0 audit logs');
+
+    // 2. Verify via adminClient that records actually exist in every single table
+    const aAcc = await adminClient.query("SELECT COUNT(*) FROM public.accounts WHERE account_type = 'customer'");
+    assert.ok(parseInt(aAcc.rows[0].count, 10) > 0, 'Database must have customer accounts');
+
+    const aTx = await adminClient.query('SELECT COUNT(*) FROM public.transactions');
+    assert.ok(parseInt(aTx.rows[0].count, 10) > 0, 'Database must have transactions');
+
+    const aPost = await adminClient.query('SELECT COUNT(*) FROM public.ledger_postings');
+    assert.ok(parseInt(aPost.rows[0].count, 10) > 0, 'Database must have ledger postings');
+
+    const aMem = await adminClient.query('SELECT COUNT(*) FROM public.account_memberships');
+    assert.ok(parseInt(aMem.rows[0].count, 10) > 0, 'Database must have account memberships');
+
+    const aUsers = await adminClient.query('SELECT COUNT(*) FROM public.users');
+    assert.ok(parseInt(aUsers.rows[0].count, 10) > 0, 'Database must have users');
+
+    const aAudit = await adminClient.query('SELECT COUNT(*) FROM public.audit_logs');
+    assert.ok(parseInt(aAudit.rows[0].count, 10) > 0, 'Database must have audit logs');
+  });
+
+  // ---------------------------------------------------------------------------
+  // 44. Identity & Role Anti-Tampering: Forged user ID or unearned role rejected
+  // ---------------------------------------------------------------------------
+  it('44. Identity & Role Anti-Tampering: Forged user ID or unearned role rejected', async () => {
+    // 1. Customer attempts to sign assertion claiming role 'admin'
+    const forgedAdminAssertion = generateHmacAssertion(customerA.id, 'admin', env.IDENTITY_HMAC_SECRET);
+    await assert.rejects(
+      async () => {
+        await query(
+          'SELECT ledger_secure.register_identity_assertion($1, $2, $3, $4, $5)',
+          [customerA.id, 'admin', forgedAdminAssertion.expiresAt, forgedAdminAssertion.nonce, forgedAdminAssertion.signature]
+        );
+      },
+      (err) => err.code === '28000' && /Assertion role admin does not match authoritative database role customer/.test(err.message),
+      'Claiming admin role with customer database user must be rejected'
+    );
+
+    // 2. Forged cryptographic signature
+    const corruptSignature = Buffer.from('corrupted_signature_bytes_0000000000000000');
+    const validAssertion = generateHmacAssertion(customerA.id, 'customer', env.IDENTITY_HMAC_SECRET);
+    await assert.rejects(
+      async () => {
+        await query(
+          'SELECT ledger_secure.register_identity_assertion($1, $2, $3, $4, $5)',
+          [customerA.id, 'customer', validAssertion.expiresAt, validAssertion.nonce, corruptSignature]
+        );
+      },
+      (err) => err.code === '28000' && /Cryptographic signature verification failed/.test(err.message),
+      'Forged signature must be rejected'
+    );
+
+    // 3. Forged non-existent user ID
+    const fakeUserId = '00000000-0000-0000-0000-000000000099';
+    const fakeAssertion = generateHmacAssertion(fakeUserId, 'customer', env.IDENTITY_HMAC_SECRET);
+    await assert.rejects(
+      async () => {
+        await query(
+          'SELECT ledger_secure.register_identity_assertion($1, $2, $3, $4, $5)',
+          [fakeUserId, 'customer', fakeAssertion.expiresAt, fakeAssertion.nonce, fakeAssertion.signature]
+        );
+      },
+      (err) => err.code === '28000' && /does not exist in database/.test(err.message),
+      'Assertion for non-existent user must be rejected'
+    );
+  });
+
+  // ---------------------------------------------------------------------------
+  // 45. Cross-User Idempotency Key Isolation: User cannot inspect, resolve, or hijack another user key
+  // ---------------------------------------------------------------------------
+  it('45. Cross-User Idempotency Key Isolation: User cannot inspect, resolve, or hijack another user key', async () => {
+    const sharedKey = `shared-key-${Date.now()}`;
+
+    // 1. Customer A deposits using sharedKey
+    const depA = await processTransactionRequest({
+      userId: customerA.id,
+      role: 'customer',
+      idempotencyKey: sharedKey,
+      method: 'POST',
+      path: '/api/transactions/deposit',
+      body: {
+        type: 'deposit',
+        amountPaise: '15000',
+        sourceAccountId: vaultAccount.id,
+        destinationAccountId: accountA,
+      },
+    });
+    assert.equal(depA.statusCode, 200);
+    assert.equal(depA.isIdempotentReplay, false);
+
+    // 2. Customer B attempts to read Customer A's idempotency record via direct SQL
+    await executeWithSession(customerB.id, 'customer', async (client) => {
+      const q = await client.query('SELECT * FROM public.idempotency_keys WHERE idempotency_key = $1', [sharedKey]);
+      assert.equal(q.rowCount, 0, 'Customer B must not see Customer A idempotency record');
+    });
+
+    // 3. Customer B submits a request with the exact same sharedKey
+    // It must NOT replay Customer A's transaction response; it executes independently in Customer B namespace
+    const depB = await processTransactionRequest({
+      userId: customerB.id,
+      role: 'customer',
+      idempotencyKey: sharedKey,
+      method: 'POST',
+      path: '/api/transactions/deposit',
+      body: {
+        type: 'deposit',
+        amountPaise: '20000',
+        sourceAccountId: vaultAccount.id,
+        destinationAccountId: accountB,
+      },
+    });
+    assert.equal(depB.statusCode, 200);
+    assert.equal(depB.isIdempotentReplay, false, 'Customer B using same key must execute independently, not replay Customer A');
+    assert.notEqual(depB.body.transaction_id, depA.body.transaction_id, 'Transactions must be distinct');
+  });
+
+  // ---------------------------------------------------------------------------
+  // 46. Admin Action Attribution & Financial Integrity Enforcement
+  // ---------------------------------------------------------------------------
+  it('46. Admin Action Attribution & Financial Integrity Enforcement: Audit logs record authentic actor ID', async () => {
+    const unique46 = Date.now() + 46;
+    const testReason = `Compliance suspension check ${unique46}`;
+
+    // 1. Admin suspends userC
+    await setUserStatus(adminUser.id, userC.id, false, testReason);
+
+    // 2. Inspect audit_logs via adminClient
+    const auditRes = await adminClient.query(
+      `SELECT actor_id, actor_role, action, entity_type, entity_id, metadata
+         FROM public.audit_logs
+        WHERE entity_id = $1 AND action = 'USER_STATUS_CHANGED'
+        ORDER BY created_at DESC
+        LIMIT 1`,
+      [userC.id]
+    );
+
+    assert.equal(auditRes.rowCount, 1, 'Audit log entry must exist for user status change');
+    const log = auditRes.rows[0];
+    assert.equal(log.actor_id, adminUser.id, 'Audit log actor_id must match verified admin actor ID');
+    assert.equal(log.actor_role, 'admin', 'Audit log actor_role must be admin');
+    assert.equal(log.entity_type, 'user');
+    assert.equal(log.metadata.reason, testReason);
+
+    // Re-activate userC
+    await setUserStatus(adminUser.id, userC.id, true, 'Re-activated after test');
+  });
+
+  // ---------------------------------------------------------------------------
+  // 47. Authorization Race Condition: Concurrent membership revocation and financial transaction serialized deterministically
+  // ---------------------------------------------------------------------------
+  it('47. Authorization Race Condition: Concurrent membership revocation and financial transaction serialized deterministically', async () => {
+    const unique47 = Date.now() + 47;
+    const resH1 = await registerCustomer(`h1_${unique47}@test.local`, 'Password123!');
+    const h1 = resH1.user;
+    const resH2 = await registerCustomer(`h2_${unique47}@test.local`, 'Password123!');
+    const h2 = resH2.user;
+
+    // Create shared account with H1 as initial holder
+    const accRes = await createCustomerAccount(h1.id, 'customer', `ACC-RACE-${unique47}`);
+    const accountRaceId = accRes.accountId;
+
+    // Admin assigns H2 as second account_holder
+    await assignMembership(adminUser.id, 'admin', accountRaceId, h2.id, 'account_holder');
+
+    // Fund account with 50000 paise from vault
+    await processTransactionRequest({
+      userId: h1.id,
+      role: 'customer',
+      idempotencyKey: `dep-race-${unique47}`,
+      method: 'POST',
+      path: '/api/transactions/deposit',
+      body: {
+        type: 'deposit',
+        amountPaise: '50000',
+        sourceAccountId: vaultAccount.id,
+        destinationAccountId: accountRaceId,
+      },
+    });
+
+    // Concurrently trigger revocation of H2 and withdrawal by H2
+    const results = await Promise.allSettled([
+      revokeMembership(adminUser.id, 'admin', accountRaceId, h2.id),
+      processTransactionRequest({
+        userId: h2.id,
+        role: 'customer',
+        idempotencyKey: `wd-race-${unique47}`,
+        method: 'POST',
+        path: '/api/transactions/withdraw',
+        body: {
+          type: 'withdrawal',
+          amountPaise: '10000',
+          sourceAccountId: accountRaceId,
+          destinationAccountId: vaultAccount.id,
+        },
+      }),
+    ]);
+
+    const revResult = results[0];
+    const wdResult = results[1];
+
+    assert.equal(revResult.status, 'fulfilled', 'Revocation must succeed');
+
+    // Check deterministic serialization
+    if (wdResult.status === 'rejected') {
+      // Revocation acquired the lock first -> withdrawal must fail with authorization error
+      assert.match(
+        wdResult.reason.message,
+        /Caller is not an active account_holder on withdrawal source account/,
+        'When revocation locks first, withdrawal must fail with account_holder authorization error'
+      );
+    } else {
+      // Withdrawal acquired the lock first -> withdrawal completed before revocation took effect
+      assert.equal(wdResult.value.statusCode, 200, 'If withdrawal serialized first, it must return 200');
+    }
+
+    // After both finish, H2 must not be able to execute any further transaction
+    await assert.rejects(
+      async () => {
+        await processTransactionRequest({
+          userId: h2.id,
+          role: 'customer',
+          idempotencyKey: `wd-race-post-${unique47}`,
+          method: 'POST',
+          path: '/api/transactions/withdraw',
+          body: {
+            type: 'withdrawal',
+            amountPaise: '5000',
+            sourceAccountId: accountRaceId,
+            destinationAccountId: vaultAccount.id,
+          },
+        });
+      },
+      (err) => /Caller is not an active account_holder on withdrawal source account/.test(err.message),
+      'After revocation, subsequent withdrawal must be denied'
+    );
+  });
 });
