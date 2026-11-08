@@ -1571,4 +1571,140 @@ describe('LedgerLine Phase 2 Comprehensive Test Suite', () => {
       (err) => err.code === '42501' || /permission denied for function claim_session_identity/.test(err.message)
     );
   });
+
+  // ---------------------------------------------------------------------------
+  // 33. Schema & Database Creation Restrictions (ledgerline_app & PUBLIC)
+  // ---------------------------------------------------------------------------
+  it('33. Schema & database creation restrictions: ledgerline_app and PUBLIC cannot create objects in protected or temporary schemas', async () => {
+    // 1. ledgerline_app cannot create tables in public
+    await assert.rejects(
+      async () => {
+        await query('CREATE TABLE public.unauthorized_tbl (id int)');
+      },
+      (err) => err.code === '42501' || /permission denied for schema public/.test(err.message)
+    );
+
+    // 2. ledgerline_app cannot create tables in ledger_secure
+    await assert.rejects(
+      async () => {
+        await query('CREATE TABLE ledger_secure.unauthorized_tbl (id int)');
+      },
+      (err) => err.code === '42501' || /permission denied for schema ledger_secure/.test(err.message)
+    );
+
+    // 3. ledgerline_app cannot create temporary tables (TEMPORARY revoked from database)
+    await assert.rejects(
+      async () => {
+        await query('CREATE TEMP TABLE unauthorized_temp_tbl (id int)');
+      },
+      (err) => err.code === '42501' || /permission denied to create temporary tables/.test(err.message)
+    );
+
+    // 4. ledgerline_app cannot create functions in pg_temp
+    await assert.rejects(
+      async () => {
+        await query("CREATE FUNCTION pg_temp.unauthorized_fn() RETURNS text AS $$ SELECT 'evil'; $$ LANGUAGE sql;");
+      },
+      (err) => err.code === '42501' || /permission denied to create temporary tables/.test(err.message)
+    );
+
+    // 5. Verify catalog privileges for PUBLIC role
+    const privCheck = await adminClient.query(`
+      SELECT has_schema_privilege('public', 'public', 'CREATE') AS public_create_public,
+             has_schema_privilege('public', 'ledger_secure', 'CREATE') AS public_create_secure,
+             has_database_privilege('public', current_database(), 'TEMPORARY') AS public_temp_db
+    `);
+    const { public_create_public, public_create_secure, public_temp_db } = privCheck.rows[0];
+    assert.equal(public_create_public, false, 'PUBLIC must not have CREATE on schema public');
+    assert.equal(public_create_secure, false, 'PUBLIC must not have CREATE on schema ledger_secure');
+    assert.equal(public_temp_db, false, 'PUBLIC must not have TEMPORARY on database');
+  });
+
+  // ---------------------------------------------------------------------------
+  // 34. Search-Path Shadow Resistance & Precedence
+  // ---------------------------------------------------------------------------
+  it('34. Search-path shadow resistance: privileged functions prioritize pg_catalog and ledger_secure, preventing object shadowing', async () => {
+    // 1. Privileged functions prioritize pg_catalog over temporary schema
+    // Demonstrate that even if a shadow object exists in pg_temp on an admin connection,
+    // a SECURITY DEFINER function with 'pg_catalog' first resolves the authentic built-in.
+    await adminClient.query('BEGIN');
+    try {
+      await adminClient.query(`
+        CREATE FUNCTION pg_temp.clock_timestamp() RETURNS timestamptz AS $$
+          SELECT '1970-01-01 00:00:00+00'::timestamptz;
+        $$ LANGUAGE sql;
+      `);
+
+      const shadowTest = await adminClient.query(`
+        DO $$
+        DECLARE
+          v_ts timestamptz;
+        BEGIN
+          SET LOCAL search_path = pg_catalog, ledger_secure, public, pg_temp;
+          v_ts := clock_timestamp();
+          IF v_ts = '1970-01-01 00:00:00+00'::timestamptz THEN
+            RAISE EXCEPTION 'VULNERABILITY: clock_timestamp was shadowed by pg_temp!';
+          END IF;
+        END $$;
+      `);
+      assert.ok(shadowTest, 'Built-in clock_timestamp must not be shadowed by pg_temp');
+    } finally {
+      await adminClient.query('ROLLBACK');
+    }
+
+    // 2. Verify search_path configuration on all 26 SECURITY DEFINER functions
+    const spCheck = await adminClient.query(`
+      SELECT p.proname,
+             array_to_string(p.proconfig, ', ') AS search_path_config
+        FROM pg_proc p
+        JOIN pg_namespace n ON n.oid = p.pronamespace
+       WHERE p.prosecdef = true
+         AND n.nspname IN ('public', 'ledger_secure')
+       ORDER BY p.proname;
+    `);
+
+    assert.equal(spCheck.rowCount, 26, 'Must inspect exactly 26 SECURITY DEFINER functions');
+    for (const row of spCheck.rows) {
+      assert.ok(row.search_path_config, `Function ${row.proname} must have configured search_path`);
+      // Every search path must begin with pg_catalog and end with pg_temp
+      assert.match(
+        row.search_path_config,
+        /^search_path=pg_catalog,.*pg_temp$/,
+        `Function ${row.proname} search path must start with pg_catalog and end with pg_temp`
+      );
+      // If both ledger_secure and public appear, ledger_secure must precede public
+      if (row.search_path_config.includes('ledger_secure') && row.search_path_config.includes('public')) {
+        const idxSecure = row.search_path_config.indexOf('ledger_secure');
+        const idxPublic = row.search_path_config.indexOf('public');
+        assert.ok(
+          idxSecure < idxPublic,
+          `Function ${row.proname} must order ledger_secure before public to prevent shadowing`
+        );
+      }
+    }
+  });
+
+  // ---------------------------------------------------------------------------
+  // 35. Trigger-Only & Internal Procedure Execution Denied to Runtime Role
+  // ---------------------------------------------------------------------------
+  it('35. Trigger-only & internal procedure execution denied to runtime role', async () => {
+    const triggerFunctions = [
+      'public.enforce_append_only_record()',
+      'public.enforce_idempotency_lifecycle()',
+      'public.enforce_transaction_immutability()',
+      'public.maintain_account_balance_from_posting()',
+      'public.prevent_extra_postings_on_finalized_tx()',
+      'public.validate_ledger_transaction_at_commit()',
+    ];
+
+    for (const tf of triggerFunctions) {
+      await assert.rejects(
+        async () => {
+          await query(`SELECT ${tf}`);
+        },
+        (err) => err.code === '42501' || /permission denied for function/.test(err.message),
+        `Runtime role ledgerline_app must not have EXECUTE privilege on ${tf}`
+      );
+    }
+  });
 });

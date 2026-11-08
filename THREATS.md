@@ -27,7 +27,7 @@ The architectural baseline enforces:
 | **Repudiation** | An actor denies executing a financial transaction or administrative action. | Immutable audit log trail with verified actor ID, authoritative role, timestamp, and metadata; cryptographic request payload hashing with RFC 8785 canonicalization. |
 | **Information Disclosure** | Leakage of balances, transaction history, credentials, or PII. | PostgreSQL `FORCE ROW LEVEL SECURITY` across all 7 domain tables; non-recursive RLS helpers; posting RLS strictly preventing cross-account leakage; sanitized error handler masking internal errors; automatic token clearance on session expiry. |
 | **Denial of Service (DoS)** | Deadlocks on concurrent transfers, replay storms, connection pool exhaustion. | Deterministic ascending UUID account locking; request idempotency reservation with cached replay; 3s database lock timeout; advisory locking on migrations (`pg_advisory_lock`); connection discard (`client.release(true)`) preventing pool contamination on unconfirmed cleanup. |
-| **Elevation of Privilege** | Runtime application role modifying permissions, bypassing RLS, or creating admin accounts. | `ledgerline_owner` is `NOLOGIN`, `NOSUPERUSER`, `NOBYPASSRLS`; `ledgerline_app` has strictly read-mostly table grants; direct `UPDATE` on `idempotency_keys` revoked; user registration restricted to `customer` role; demoted/stale JWTs blocked by database assertion checks. |
+| **Elevation of Privilege** | Runtime application role modifying permissions, bypassing RLS, or creating admin accounts. | `ledgerline_owner` is `NOLOGIN`, `NOSUPERUSER`, `NOBYPASSRLS`; `ledgerline_app` has strictly read-mostly table grants; direct `UPDATE` on `idempotency_keys` revoked; user registration restricted to `customer` role; demoted/stale JWTs blocked by database assertion checks; `TEMPORARY` privilege revoked from database preventing `pg_temp` object injection; `SECURITY DEFINER` search paths hardened (`pg_catalog, ledger_secure, public, pg_temp`). |
 
 ---
 
@@ -74,6 +74,13 @@ The architectural baseline enforces:
    - Client generates standard UUID v4 idempotency keys per operation.
    - Retries preserve the key to avoid duplicate debits.
    - The UI detects `Idempotent-Replay` HTTP response headers and explicitly notifies the operator.
+7. **SECURITY DEFINER Search-Path Hardening & Temporary Object Isolation**:
+   - PostgreSQL grants `TEMPORARY` on newly created databases to `PUBLIC` by default, which previously allowed untrusted connections to create temporary tables or functions in `pg_temp`.
+   - Migration `009` revoked `TEMPORARY ON DATABASE` from `PUBLIC` and `ledgerline_app`, blocking object creation in temporary schemas.
+   - Re-enforced `REVOKE CREATE ON SCHEMA public, ledger_secure FROM PUBLIC, ledgerline_app`.
+   - Hardened `search_path` across all 26 `SECURITY DEFINER` functions to prioritize `pg_catalog` and `ledger_secure` before `public`, ending with `pg_temp` (`SET search_path = pg_catalog, ledger_secure, public, pg_temp`), preventing function and operator shadowing.
+   - Restricted pure validation trigger functions to minimal search path (`pg_catalog, pg_temp`).
+   - Verified that all 26 functions are owned by `ledgerline_owner`, lack dynamic SQL (`EXECUTE '...'`), and utilize fully qualified object names (`public.*`, `ledger_secure.*`).
 
 ---
 

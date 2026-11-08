@@ -102,3 +102,19 @@ This document records the genuine prompt history and development requests execut
   5. Confirm production client build succeeds with zero errors.
   6. Stage and commit all verified Phase 3 work with message `feat: complete LedgerLine Phase 3 application`.
 - **Outcome**: All security closures verified, 77/77 tests passed, client built in 5.55s, and Phase 3 committed cleanly.
+
+---
+
+## Prompt 10: Phase 4, Task 1 — SECURITY DEFINER Search-Path Audit and Hardening
+- **Date**: 2026-11-08
+- **Request Summary**:
+  1. Audit schema privileges on `ledgerline_test` for `public`, `ledger_secure`, and `pg_temp`.
+  2. Audit all 26 `SECURITY DEFINER` functions: verify ownership by `ledgerline_owner`, explicit schema qualification, dynamic SQL absence, and search path safety.
+  3. Resolve writable schema and search path risks via additive migration `009_harden_search_paths_and_schema_privileges.sql`:
+     - Revoke `TEMPORARY` on database from `PUBLIC` and `ledgerline_app`.
+     - Re-enforce `REVOKE CREATE ON SCHEMA public, ledger_secure FROM PUBLIC, ledgerline_app`.
+     - Order `ledger_secure` before `public` in function search paths (`SET search_path = pg_catalog, ledger_secure, public, pg_temp`) so security-critical procedures cannot be shadowed by `public`.
+     - Set pure logic trigger search paths to `pg_catalog, pg_temp`.
+     - Re-enforce execution revokes on `claim_session_identity` and `record_business_refusal` from `PUBLIC` and `ledgerline_app`.
+  4. Add automated regression tests (Tests 33, 34, 35) in `server/test/phase2.test.js` validating schema creation locks, temp object prohibition, search-path shadow resistance, and trigger function execution denial.
+- **Outcome**: Additive migration `009` applied successfully under advisory lock; server tests expanded to 39/39 passed; client tests 41/41 passed (80/80 total). Development database `ledgerline_dev` preserved.
