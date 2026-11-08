@@ -11,6 +11,11 @@ dotenv.config({ path: path.resolve(__dirname, '../../../../.env') });
 
 const NODE_ENV = process.env.NODE_ENV || 'development';
 
+// In test environment, load isolated test environment settings (.env.test) with override
+if (NODE_ENV === 'test') {
+  dotenv.config({ path: path.resolve(__dirname, '../../.env.test'), override: true });
+}
+
 // -----------------------------------------------------------------------------
 // Security Secret Validations
 // -----------------------------------------------------------------------------
@@ -26,6 +31,15 @@ if (!jwtSecret || jwtSecret.length < 32) {
   throw new Error(
     'Startup configuration error: JWT_SECRET must be provided and must be at least 32 characters long.'
   );
+}
+
+// In production, reject empty or missing runtime database credentials
+if (NODE_ENV === 'production') {
+  if (!process.env.DB_PASSWORD) {
+    throw new Error(
+      'Production configuration error: DB_PASSWORD must be explicitly configured and non-empty in production.'
+    );
+  }
 }
 
 export const env = {

@@ -18,6 +18,19 @@ export async function bootstrapDatabase() {
   console.log(`Database: ${env.DB_NAME} on ${env.DB_HOST}:${env.DB_PORT}`);
   console.log(`Administrative User: ${env.ADMIN_DB_USER}`);
 
+  if (env.NODE_ENV === 'production') {
+    if (!process.env.ADMIN_DB_USER || !process.env.ADMIN_DB_PASSWORD) {
+      throw new Error(
+        'Production security error: ADMIN_DB_USER and ADMIN_DB_PASSWORD must be explicitly provided in production.'
+      );
+    }
+    if (!process.env.INITIAL_ADMIN_PASSWORD || process.env.INITIAL_ADMIN_PASSWORD.length < 12) {
+      throw new Error(
+        'Production security error: INITIAL_ADMIN_PASSWORD must be explicitly provided and at least 12 characters in production.'
+      );
+    }
+  }
+
   const client = new Client({
     host: env.DB_HOST,
     port: env.DB_PORT,
@@ -29,6 +42,22 @@ export async function bootstrapDatabase() {
   try {
     await client.connect();
     console.log('Connected successfully as administrator.');
+
+    // Verify connected database identity matches environment
+    const dbRes = await client.query(
+      'SELECT host(inet_server_addr()) AS server_ip, inet_server_port() AS server_port, current_database() AS db_name'
+    );
+    const { server_ip, db_name: connectedDb } = dbRes.rows[0] || {};
+    if (env.NODE_ENV === 'test' && connectedDb !== 'ledgerline_test') {
+      throw new Error(
+        `CRITICAL TEST ISOLATION FAILURE: Connected database is '${connectedDb}', but test bootstrap is restricted to 'ledgerline_test'.`
+      );
+    }
+    if (env.NODE_ENV === 'test' && server_ip && server_ip !== '127.0.0.1' && server_ip !== '::1') {
+      throw new Error(
+        `CRITICAL TEST ISOLATION FAILURE: Connected server IP is '${server_ip}', expected local test host 127.0.0.1.`
+      );
+    }
 
     await client.query('BEGIN');
 

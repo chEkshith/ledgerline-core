@@ -41,7 +41,10 @@ GRANT EXECUTE ON FUNCTION public.set_user_status(UUID, BOOLEAN, VARCHAR) TO ledg
 GRANT EXECUTE ON FUNCTION ledger_secure.register_identity_assertion(UUID, VARCHAR, TIMESTAMPTZ, UUID, BYTEA) TO ledgerline_app;
 GRANT EXECUTE ON FUNCTION ledger_secure.consume_identity_assertion(UUID, BYTEA) TO ledgerline_app;
 GRANT EXECUTE ON FUNCTION ledger_secure.establish_session_identity(UUID, BYTEA) TO ledgerline_app;
-GRANT EXECUTE ON FUNCTION ledger_secure.claim_session_identity(UUID, BYTEA) TO ledgerline_app;
+-- Note: claim_session_identity is revoked from ledgerline_app and PUBLIC; apps must use the independent lifecycle
+REVOKE ALL ON FUNCTION ledger_secure.claim_session_identity(UUID, BYTEA) FROM PUBLIC;
+REVOKE ALL ON FUNCTION ledger_secure.claim_session_identity(UUID, BYTEA) FROM ledgerline_app;
+GRANT EXECUTE ON FUNCTION ledger_secure.claim_session_identity(UUID, BYTEA) TO ledgerline_owner;
 GRANT EXECUTE ON FUNCTION ledger_secure.clear_session_identity(BIGINT) TO ledgerline_app;
 
 GRANT EXECUTE ON FUNCTION public.create_customer_account(VARCHAR, VARCHAR) TO ledgerline_app;

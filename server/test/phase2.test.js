@@ -33,14 +33,51 @@ describe('LedgerLine Phase 2 Comprehensive Test Suite', () => {
   let adminClient; // Privileged connection strictly for test-only trigger verification
 
   before(async () => {
+    // 0. Strict Test Isolation Guard: Refuse to execute against anything other than ledgerline_test
+    if (env.DB_NAME !== 'ledgerline_test') {
+      throw new Error(
+        `CRITICAL TEST ISOLATION FAILURE: Integration tests must execute strictly against an isolated test database ('ledgerline_test'). Refusing to run against '${env.DB_NAME}' to safeguard development data.`
+      );
+    }
+
+    if (process.env.DATABASE_URL && !process.env.DATABASE_URL.includes('ledgerline_test')) {
+      throw new Error(
+        'CRITICAL TEST ISOLATION FAILURE: DATABASE_URL must not override test database isolation.'
+      );
+    }
+
+    const dbCheck = await query(
+      'SELECT host(inet_server_addr()) AS server_ip, inet_server_port() AS server_port, current_database() AS db_name'
+    );
+    const { server_ip, server_port, db_name: actualDb } = dbCheck.rows[0] || {};
+    if (actualDb !== 'ledgerline_test') {
+      throw new Error(
+        `CRITICAL TEST ISOLATION FAILURE: Connected database is '${actualDb}', but tests are only permitted to execute against 'ledgerline_test'. Refusing execution.`
+      );
+    }
+    if (server_ip && server_ip !== '127.0.0.1' && server_ip !== '::1') {
+      throw new Error(
+        `CRITICAL TEST ISOLATION FAILURE: Connected server IP is '${server_ip}', expected local test host 127.0.0.1.`
+      );
+    }
+
     // 1. Fetch system vault
     const vaultRes = await query("SELECT id FROM public.accounts WHERE system_role_type = 'SYSTEM_CASH_VAULT'");
     assert.ok(vaultRes.rowCount > 0, 'System vault must exist');
     vaultAccount = vaultRes.rows[0];
 
-    // 2. Authenticate admin user
-    const adminLogin = await login('admin@ledgerline.local', 'Admin@123!');
-    assert.ok(adminLogin.user && adminLogin.user.id, 'Admin user must exist and authenticate');
+    // 2. Authenticate admin user using environment-provisioned credentials
+    const adminEmail = env.INITIAL_ADMIN_EMAIL;
+    const adminPassword = env.INITIAL_ADMIN_PASSWORD;
+
+    if (!adminEmail || !adminPassword) {
+      throw new Error(
+        'Test configuration error: INITIAL_ADMIN_EMAIL and INITIAL_ADMIN_PASSWORD must be defined in environment (provisioned via bootstrap).'
+      );
+    }
+
+    const adminLogin = await login(adminEmail, adminPassword);
+    assert.ok(adminLogin.user && adminLogin.user.id, 'Admin user must exist and authenticate with environment credentials');
     adminUser = adminLogin.user;
 
     // 3. Register test customers
@@ -108,7 +145,7 @@ describe('LedgerLine Phase 2 Comprehensive Test Suite', () => {
 
     assert.equal(res.statusCode, 200);
     assert.equal(res.body.status, 'success');
-    assert.equal(res.body.amount_paise, '50000');
+    assert.equal(res.body.amount_paise, 50000);
 
     // Verify balance
     const acc = await executeWithSession(customerA.id, 'customer', async (client) => {
@@ -265,18 +302,19 @@ describe('LedgerLine Phase 2 Comprehensive Test Suite', () => {
       destinationAccountId: accountA,
     };
 
-    const res = await processTransactionRequest({
-      userId: customerA.id,
-      role: 'customer',
-      idempotencyKey: key,
-      method: 'POST',
-      path: '/api/transactions',
-      body,
-    });
-
-    assert.equal(res.statusCode, 422);
-    assert.equal(res.body.status, 'refused');
-    assert.equal(res.body.reason, 'UNAUTHORIZED_SOURCE_ACCOUNT');
+    await assert.rejects(
+      async () => {
+        await processTransactionRequest({
+          userId: customerA.id,
+          role: 'customer',
+          idempotencyKey: key,
+          method: 'POST',
+          path: '/api/transactions',
+          body,
+        });
+      },
+      /Caller is not an active account_holder on transfer source account/
+    );
   });
 
   // ---------------------------------------------------------------------------
@@ -291,18 +329,19 @@ describe('LedgerLine Phase 2 Comprehensive Test Suite', () => {
       destinationAccountId: accountB, // Customer A attempting deposit to Customer B account
     };
 
-    const res = await processTransactionRequest({
-      userId: customerA.id,
-      role: 'customer',
-      idempotencyKey: key,
-      method: 'POST',
-      path: '/api/transactions',
-      body,
-    });
-
-    assert.equal(res.statusCode, 422);
-    assert.equal(res.body.status, 'refused');
-    assert.equal(res.body.reason, 'UNAUTHORIZED_DESTINATION_ACCOUNT');
+    await assert.rejects(
+      async () => {
+        await processTransactionRequest({
+          userId: customerA.id,
+          role: 'customer',
+          idempotencyKey: key,
+          method: 'POST',
+          path: '/api/transactions',
+          body,
+        });
+      },
+      /Caller is not an active account_holder on deposit destination account/
+    );
   });
 
   // ---------------------------------------------------------------------------
@@ -317,18 +356,19 @@ describe('LedgerLine Phase 2 Comprehensive Test Suite', () => {
       destinationAccountId: accountB,
     };
 
-    const res = await processTransactionRequest({
-      userId: auditorUser.id,
-      role: 'customer',
-      idempotencyKey: key,
-      method: 'POST',
-      path: '/api/transactions',
-      body,
-    });
-
-    assert.equal(res.statusCode, 422);
-    assert.equal(res.body.status, 'refused');
-    assert.equal(res.body.reason, 'AUDITOR_CANNOT_INITIATE_OPERATIONS');
+    await assert.rejects(
+      async () => {
+        await processTransactionRequest({
+          userId: auditorUser.id,
+          role: 'customer',
+          idempotencyKey: key,
+          method: 'POST',
+          path: '/api/transactions',
+          body,
+        });
+      },
+      /Caller is not an active account_holder on transfer source account|Auditor role cannot initiate operations/
+    );
   });
 
   // ---------------------------------------------------------------------------
@@ -445,22 +485,49 @@ describe('LedgerLine Phase 2 Comprehensive Test Suite', () => {
       }),
     ]);
 
-    const successes = results.filter(r => r.status === 'fulfilled');
-    assert.ok(successes.length >= 1, 'At least one request must succeed');
-    const txId = successes[0].value.body.transaction_id;
+    // Winning request must be fulfilled with status 200
+    const fulfilled200 = results.filter(r => r.status === 'fulfilled' && r.value.statusCode === 200);
+    assert.ok(fulfilled200.length >= 1, 'At least one request must succeed with HTTP 200');
 
-    // Direct Database Verification: Exactly 1 transaction and exactly 2 postings exist
-    const txCountRes = await query('SELECT COUNT(*) FROM public.transactions WHERE idempotency_key = $1', [key]);
-    assert.equal(parseInt(txCountRes.rows[0].count, 10), 1, 'Exactly one transaction row must be created');
+    // Primary winner must have isIdempotentReplay === false
+    const winner = fulfilled200.find(r => r.value.isIdempotentReplay === false);
+    assert.ok(winner, 'The winning execution must have isIdempotentReplay === false');
+    assert.equal(winner.value.isIdempotentReplay, false, 'Winner isIdempotentReplay must explicitly be false');
+    const winnerTxId = winner.value.body.transaction_id;
+    assert.ok(winnerTxId, 'Winning transaction must return a valid transaction_id');
 
-    const postCountRes = await query('SELECT COUNT(*) FROM public.ledger_postings WHERE transaction_id = $1', [txId]);
-    assert.equal(parseInt(postCountRes.rows[0].count, 10), 2, 'Exactly two ledger postings must exist');
+    // Concurrent counterpart must either be an exact replay (200, same txId, isIdempotentReplay: true)
+    // OR return documented in-progress rejection (HTTP 409). Unexpected errors must fail the test.
+    for (const r of results) {
+      if (r === winner) continue;
+      if (r.status === 'fulfilled') {
+        assert.equal(r.value.statusCode, 200, 'Replay response must have statusCode 200');
+        assert.equal(r.value.isIdempotentReplay, true, 'Replay response must set isIdempotentReplay=true');
+        assert.equal(r.value.body.transaction_id, winnerTxId, 'Replay must return identical transaction_id');
+      } else {
+        assert.equal(r.reason.status, 409, 'Concurrent in-progress request must return HTTP 409');
+        assert.match(
+          r.reason.message,
+          /A request with this idempotency key is currently in progress/,
+          'Rejection must specifically be concurrent in-progress error'
+        );
+      }
+    }
 
-    const idempKeyRes = await query(
-      'SELECT status FROM public.idempotency_keys WHERE user_id = $1 AND idempotency_key = $2',
+    // Direct Database Verification: Exactly 1 idempotency record, 1 transaction, and 2 postings
+    const idempKeyRes = await adminClient.query(
+      'SELECT id, status, transaction_id FROM public.idempotency_keys WHERE user_id = $1 AND idempotency_key = $2',
       [customerA.id, key]
     );
+    assert.equal(idempKeyRes.rowCount, 1, 'Exactly one idempotency record must exist');
     assert.equal(idempKeyRes.rows[0].status, 'resolved', 'Idempotency key must be in resolved status');
+    assert.equal(idempKeyRes.rows[0].transaction_id, winnerTxId, 'Idempotency record must be bound to winner transaction');
+
+    const txCountRes = await adminClient.query('SELECT COUNT(*) FROM public.transactions WHERE id = $1', [winnerTxId]);
+    assert.equal(parseInt(txCountRes.rows[0].count, 10), 1, 'Exactly one transaction row must be created');
+
+    const postCountRes = await adminClient.query('SELECT COUNT(*) FROM public.ledger_postings WHERE transaction_id = $1', [winnerTxId]);
+    assert.equal(parseInt(postCountRes.rows[0].count, 10), 2, 'Exactly two ledger postings must exist');
   });
 
   // ---------------------------------------------------------------------------
@@ -504,8 +571,8 @@ describe('LedgerLine Phase 2 Comprehensive Test Suite', () => {
     const statuses = [res1.statusCode, res2.statusCode].sort();
     assert.deepEqual(statuses, [200, 422], 'Exactly one transfer must succeed (200) and one must be refused (422)');
 
-    // Ensure accountA balance remains non-negative
-    const acc = await query('SELECT current_balance FROM public.accounts WHERE id = $1', [accountA]);
+    // Ensure accountA balance remains non-negative (query via adminClient to bypass RLS)
+    const acc = await adminClient.query('SELECT current_balance FROM public.accounts WHERE id = $1', [accountA]);
     const balance = BigInt(acc.rows[0].current_balance);
     assert.ok(balance >= 0n, 'Account balance must never become negative');
   });
@@ -676,7 +743,7 @@ describe('LedgerLine Phase 2 Comprehensive Test Suite', () => {
       );
       await client.query('ROLLBACK');
 
-      // Vector C: Compatibility wrapper claim_session_identity fails
+      // Vector C1: ledgerline_app cannot execute claim_session_identity (grant revoked)
       await client.query('BEGIN');
       await assert.rejects(
         async () => {
@@ -685,9 +752,22 @@ describe('LedgerLine Phase 2 Comprehensive Test Suite', () => {
             [assertion.nonce, assertion.signature]
           );
         },
-        /has already been claimed and cannot be reused/
+        /permission denied for function claim_session_identity/
       );
       await client.query('ROLLBACK');
+
+      // Vector C2: Even on privileged connection, claim_session_identity rejects consumed nonce
+      await adminClient.query('BEGIN');
+      await assert.rejects(
+        async () => {
+          await adminClient.query(
+            'SELECT ledger_secure.claim_session_identity($1, $2)',
+            [assertion.nonce, assertion.signature]
+          );
+        },
+        /has already been claimed and cannot be reused/
+      );
+      await adminClient.query('ROLLBACK');
     } finally {
       await client.query('ROLLBACK').catch(() => {});
       client.release();
@@ -743,6 +823,13 @@ describe('LedgerLine Phase 2 Comprehensive Test Suite', () => {
     assert.ok(fulfilled, 'One revocation must succeed');
     assert.ok(rejected, 'Second revocation must be rejected');
     assert.match(rejected.reason.message, /Cannot revoke the final account_holder/);
+
+    // Verify account retains exactly 1 active account_holder in the database
+    const holdersRes = await adminClient.query(
+      "SELECT COUNT(*) FROM public.account_memberships WHERE account_id = $1 AND role = 'account_holder'",
+      [accountA]
+    );
+    assert.equal(parseInt(holdersRes.rows[0].count, 10), 1, 'Account must retain exactly 1 active account_holder');
 
     // Ensure customerA is restored as account_holder
     await assignMembership(adminUser.id, 'admin', accountA, customerA.id, 'account_holder').catch(() => {});
@@ -875,14 +962,11 @@ describe('LedgerLine Phase 2 Comprehensive Test Suite', () => {
     // 2. Deliberately corrupt account balance in a privileged test transaction and assert commit validator fails
     await adminClient.query('BEGIN');
     try {
-      // Corrupt cached balance
-      await adminClient.query('UPDATE public.accounts SET current_balance = current_balance + 9999 WHERE id = $1', [accountA]);
-
-      // Insert a posted transaction and balanced postings
+      // Insert a pending transaction first so postings can be added
       const txRes = await adminClient.query(`
         INSERT INTO public.transactions 
           (type, status, amount_paise, currency, source_account_id, destination_account_id, created_by)
-        VALUES ('transfer', 'posted', 100, 'INR', $1, $2, $3)
+        VALUES ('transfer', 'pending', 100, 'INR', $1, $2, $3)
         RETURNING id
       `, [accountA, accountB, customerA.id]);
       const txId = txRes.rows[0].id;
@@ -894,6 +978,14 @@ describe('LedgerLine Phase 2 Comprehensive Test Suite', () => {
           ($1, $2, 'DEBIT', 100, -100, 1),
           ($1, $3, 'CREDIT', 100, 100, 2)
       `, [txId, accountA, accountB]);
+
+      // Transition transaction to 'posted'
+      await adminClient.query(`
+        UPDATE public.transactions SET status = 'posted' WHERE id = $1
+      `, [txId]);
+
+      // Corrupt cached balance on accountA
+      await adminClient.query('UPDATE public.accounts SET current_balance = current_balance + 9999 WHERE id = $1', [accountA]);
 
       // Attempt commit -> deferred trigger must abort commit with reconciliation error
       await assert.rejects(
@@ -1051,42 +1143,93 @@ describe('LedgerLine Phase 2 Comprehensive Test Suite', () => {
   // ---------------------------------------------------------------------------
   // 24. Refused Transaction Zero Postings
   // ---------------------------------------------------------------------------
-  it('24. Refused transaction zero postings: validator verifies exactly 0 postings exist', async () => {
-    const count = await executeWithSession(customerA.id, 'customer', async (client) => {
-      const refusedRes = await client.query("SELECT id FROM public.transactions WHERE status = 'refused' LIMIT 1");
-      assert.ok(refusedRes.rowCount > 0, 'Refused transaction must exist');
-      const refusedId = refusedRes.rows[0].id;
-      const countRes = await client.query('SELECT COUNT(*) FROM public.ledger_postings WHERE transaction_id = $1', [refusedId]);
-      return parseInt(countRes.rows[0].count, 10);
+  it('24. Refused transaction zero postings: validator verifies exactly 0 postings exist for specific refused transaction', async () => {
+    const key = `refused_postings_check_${Date.now()}`;
+    const res = await processTransactionRequest({
+      userId: customerA.id,
+      role: 'customer',
+      idempotencyKey: key,
+      method: 'POST',
+      path: '/api/transactions',
+      body: {
+        type: 'transfer',
+        amountPaise: 999999999, // Guaranteed refusal (insufficient funds)
+        sourceAccountId: accountA,
+        destinationAccountId: accountB,
+      },
     });
-    assert.equal(count, 0);
+
+    assert.equal(res.statusCode, 422);
+    assert.equal(res.body.status, 'refused');
+    const specificRefusedId = res.body.transaction_id;
+    assert.ok(specificRefusedId, 'Refused transaction must return a transaction_id');
+
+    // Verify postings specifically for this transaction via adminClient
+    const countRes = await adminClient.query(
+      'SELECT COUNT(*) FROM public.ledger_postings WHERE transaction_id = $1',
+      [specificRefusedId]
+    );
+    assert.equal(parseInt(countRes.rows[0].count, 10), 0, 'Specifically created refused transaction must have 0 postings');
   });
 
   // ---------------------------------------------------------------------------
   // 25. Session Context Cleanup After Commit and Rollback
   // ---------------------------------------------------------------------------
-  it('25. Session context cleanup: context deleted after commit and rollback', async () => {
+  it('25. Session context cleanup: captures backend PID and verifies exact context deletion on commit and rollback', async () => {
     // 1. Commit Path Cleanup
-    await executeWithSession(customerA.id, 'customer', async (client) => {
-      const inTxRes = await client.query('SELECT ledger_secure.current_verified_user_id() AS uid');
-      assert.equal(inTxRes.rows[0].uid, customerA.id);
+    let commitPid = null;
+    let commitTxid = null;
+
+    await executeWithSession(customerA.id, 'customer', async (client, txid) => {
+      commitTxid = txid;
+      // Verify active session identity on the active client via helper
+      const uidRes = await client.query('SELECT ledger_secure.current_verified_user_id() AS uid');
+      assert.equal(uidRes.rows[0].uid, customerA.id, 'Session identity must be established inside transaction');
+
+      const pidRes = await client.query('SELECT pg_backend_pid() AS pid');
+      commitPid = pidRes.rows[0].pid;
     });
-    const postCommitUid = await query('SELECT ledger_secure.current_verified_user_id() AS uid');
-    assert.equal(postCommitUid.rows[0].uid, null, 'Context must be cleared post-commit');
+
+    assert.ok(commitPid, 'Must capture backend PID from commit session');
+    assert.ok(commitTxid, 'Must capture financial transaction ID from commit session');
+
+    // Post-Commit Verification: Query active_session_contexts for that EXACT backend PID and txid via privileged adminClient
+    const postCommitRes = await adminClient.query(
+      'SELECT * FROM ledger_secure.active_session_contexts WHERE backend_pid = $1 OR txid = $2::bigint',
+      [commitPid, commitTxid]
+    );
+    assert.equal(postCommitRes.rowCount, 0, 'Context row for exact backend PID and txid must be deleted post-commit');
 
     // 2. Rollback Path Cleanup
+    let rollbackPid = null;
+    let rollbackTxid = null;
+
     await assert.rejects(
       async () => {
-        await executeWithSession(customerA.id, 'customer', async (client) => {
-          const inTxRes = await client.query('SELECT ledger_secure.current_verified_user_id() AS uid');
-          assert.equal(inTxRes.rows[0].uid, customerA.id);
-          throw new Error('deliberate_financial_abort');
+        await executeWithSession(customerA.id, 'customer', async (client, txid) => {
+          rollbackTxid = txid;
+          // Verify active session identity on the active client prior to abort
+          const uidRes = await client.query('SELECT ledger_secure.current_verified_user_id() AS uid');
+          assert.equal(uidRes.rows[0].uid, customerA.id, 'Session identity must be established prior to abort');
+
+          const pidRes = await client.query('SELECT pg_backend_pid() AS pid');
+          rollbackPid = pidRes.rows[0].pid;
+
+          throw new Error('deliberate_abort_for_cleanup_test');
         });
       },
-      /deliberate_financial_abort/
+      /deliberate_abort_for_cleanup_test/
     );
-    const postRollbackUid = await query('SELECT ledger_secure.current_verified_user_id() AS uid');
-    assert.equal(postRollbackUid.rows[0].uid, null, 'Context must be cleared post-rollback');
+
+    assert.ok(rollbackPid, 'Must capture backend PID from rollback session');
+    assert.ok(rollbackTxid, 'Must capture financial transaction ID from rollback session');
+
+    // Post-Rollback Verification: Query active_session_contexts for that EXACT backend PID and txid via privileged adminClient
+    const postRollbackRes = await adminClient.query(
+      'SELECT * FROM ledger_secure.active_session_contexts WHERE backend_pid = $1 OR txid = $2::bigint',
+      [rollbackPid, rollbackTxid]
+    );
+    assert.equal(postRollbackRes.rowCount, 0, 'Context row for exact backend PID and txid must be deleted post-rollback');
   });
 
   // ---------------------------------------------------------------------------
@@ -1146,19 +1289,27 @@ describe('LedgerLine Phase 2 Comprehensive Test Suite', () => {
     });
     const txId = txRes.body.transaction_id;
 
-    // 1. Authorized participant (customerA) reads transaction
+    // 1. Authorized participant (customerA) reads transaction (sees accountA posting under RLS)
     const readA = await getTransactionById({ userId: customerA.id, role: 'customer', transactionId: txId });
     assert.equal(readA.transaction.id, txId);
-    assert.equal(readA.postings.length, 2);
+    assert.equal(readA.postings.length, 1);
     assert.equal(readA.postings[0].entry_type, 'DEBIT');
-    assert.equal(readA.postings[1].entry_type, 'CREDIT');
+    assert.equal(readA.postings[0].account_id, accountA);
 
-    // 2. Auditor reads transaction
+    // 2. Administrator reads transaction (sees both balanced double-entry postings)
+    const readAdmin = await getTransactionById({ userId: adminUser.id, role: 'admin', transactionId: txId });
+    assert.equal(readAdmin.transaction.id, txId);
+    assert.equal(readAdmin.postings.length, 2);
+    assert.equal(readAdmin.postings[0].entry_type, 'DEBIT');
+    assert.equal(readAdmin.postings[1].entry_type, 'CREDIT');
+
+    // 3. Auditor reads transaction (sees accountA posting under RLS without cross-account leakage)
     const readAuditor = await getTransactionById({ userId: auditorUser.id, role: 'customer', transactionId: txId });
     assert.equal(readAuditor.transaction.id, txId);
-    assert.equal(readAuditor.postings.length, 2);
+    assert.equal(readAuditor.postings.length, 1);
+    assert.equal(readAuditor.postings[0].account_id, accountA);
 
-    // 3. Unauthorized customer (userC) reading transaction -> 404 access denied
+    // 4. Unauthorized customer (userC) reading transaction -> 404 access denied
     await assert.rejects(
       async () => {
         await getTransactionById({ userId: userC.id, role: 'customer', transactionId: txId });
@@ -1197,6 +1348,227 @@ describe('LedgerLine Phase 2 Comprehensive Test Suite', () => {
         await getAccountStatement(userC.id, 'customer', accountA, 10, 0);
       },
       (err) => err.status === 404 && /Account not found or access denied/.test(err.message)
+    );
+  });
+
+  // ---------------------------------------------------------------------------
+  // 29. Admin Action Attribution & Audit Log Recording
+  // ---------------------------------------------------------------------------
+  it('29. Admin action attribution: records verified admin actor ID and details in audit log', async () => {
+    // Admin suspends userC
+    const reason = 'Suspicious velocity detected by compliance';
+    const statusResult = await setUserStatus(adminUser.id, userC.id, false, reason);
+    assert.equal(statusResult.success, true);
+    assert.equal(statusResult.isActive, false);
+
+    // Verify user table state
+    const userRes = await adminClient.query('SELECT is_active FROM public.users WHERE id = $1', [userC.id]);
+    assert.equal(userRes.rows[0].is_active, false, 'User must be marked inactive');
+
+    // Verify audit log has the true admin actor
+    const auditRes = await adminClient.query(
+      `SELECT actor_id, actor_role, action, entity_type, entity_id, metadata
+         FROM public.audit_logs
+        WHERE entity_id = $1 AND action = 'USER_STATUS_CHANGED'
+        ORDER BY created_at DESC
+        LIMIT 1`,
+      [userC.id]
+    );
+    assert.equal(auditRes.rowCount, 1, 'Audit log entry must be created');
+    const log = auditRes.rows[0];
+    assert.equal(log.actor_id, adminUser.id, 'Audit log actor_id must match verified admin user ID');
+    assert.equal(log.actor_role, 'admin', 'Audit log actor_role must be admin');
+    assert.equal(log.metadata.reason, reason, 'Audit log metadata must contain the reason');
+    assert.equal(log.metadata.new_is_active, false);
+
+    // Reactivate userC to clean up
+    await setUserStatus(adminUser.id, userC.id, true, 'Account reinstated after review');
+    const reactivatedRes = await adminClient.query('SELECT is_active FROM public.users WHERE id = $1', [userC.id]);
+    assert.equal(reactivatedRes.rows[0].is_active, true, 'User must be reactivated');
+  });
+
+  // ---------------------------------------------------------------------------
+  // 30. Null-Safe Admin Authorization Matrix (5 Cases)
+  // ---------------------------------------------------------------------------
+  describe('30. Null-safe admin authorization matrix for set_user_status', () => {
+    // Helper to query target user state and audit log count
+    async function getTargetUserState(userId) {
+      const uRes = await adminClient.query('SELECT is_active FROM public.users WHERE id = $1', [userId]);
+      const aRes = await adminClient.query(
+        "SELECT COUNT(*)::int AS count FROM public.audit_logs WHERE entity_id = $1 AND action = 'USER_STATUS_CHANGED'",
+        [userId]
+      );
+      return { isActive: uRes.rows[0]?.is_active, auditCount: aRes.rows[0]?.count };
+    }
+
+    it('Case 1: Rejects execution with NO session context (v_current_user_id IS NULL)', async () => {
+      const before = await getTargetUserState(userC.id);
+      assert.equal(before.isActive, true);
+
+      // Call public.set_user_status directly without session context
+      await assert.rejects(
+        async () => {
+          await query('SELECT public.set_user_status($1, $2, $3)', [userC.id, false, 'Tamper without session']);
+        },
+        (err) => /Only an administrator can modify user status/.test(err.message) || err.code === '42501'
+      );
+
+      const after = await getTargetUserState(userC.id);
+      assert.equal(after.isActive, before.isActive, 'Target user is_active must remain unchanged');
+      assert.equal(after.auditCount, before.auditCount, 'Zero audit logs must be inserted on rejection');
+    });
+
+    it('Case 2: Rejects execution with Customer session context', async () => {
+      const before = await getTargetUserState(userC.id);
+
+      await assert.rejects(
+        async () => {
+          await executeWithSession(customerA.id, 'customer', async (client) => {
+            await client.query('SELECT public.set_user_status($1, $2, $3)', [userC.id, false, 'Tamper by customer']);
+          });
+        },
+        (err) => /Only an administrator can modify user status/.test(err.message) || err.code === '42501'
+      );
+
+      const after = await getTargetUserState(userC.id);
+      assert.equal(after.isActive, before.isActive, 'Target user is_active must remain unchanged');
+      assert.equal(after.auditCount, before.auditCount, 'Zero audit logs must be inserted on rejection');
+    });
+
+    it('Case 3: Rejects execution with Auditor session context', async () => {
+      const before = await getTargetUserState(userC.id);
+
+      // Attempting to assert role auditor or execute with auditor context
+      await assert.rejects(
+        async () => {
+          await executeWithSession(auditorUser.id, 'auditor', async (client) => {
+            await client.query('SELECT public.set_user_status($1, $2, $3)', [userC.id, false, 'Tamper by auditor']);
+          });
+        },
+        (err) => /Assertion role auditor does not match authoritative database role/.test(err.message) ||
+                 /Only an administrator can modify user status/.test(err.message)
+      );
+
+      const after = await getTargetUserState(userC.id);
+      assert.equal(after.isActive, before.isActive, 'Target user is_active must remain unchanged');
+      assert.equal(after.auditCount, before.auditCount, 'Zero audit logs must be inserted on rejection');
+    });
+
+    it('Case 4: Succeeds with verified Admin session context', async () => {
+      const before = await getTargetUserState(userC.id);
+      assert.equal(before.isActive, true);
+
+      // Admin successfully suspends userC
+      await setUserStatus(adminUser.id, userC.id, false, 'Legitimate administrative suspension');
+
+      const suspended = await getTargetUserState(userC.id);
+      assert.equal(suspended.isActive, false, 'Target user must be suspended');
+      assert.equal(suspended.auditCount, before.auditCount + 1, 'Exactly one audit log entry must be recorded');
+
+      // Admin successfully reactivates userC
+      await setUserStatus(adminUser.id, userC.id, true, 'Reactivation cleanup');
+
+      const restored = await getTargetUserState(userC.id);
+      assert.equal(restored.isActive, true, 'Target user must be restored');
+      assert.equal(restored.auditCount, suspended.auditCount + 1, 'Exactly one audit log entry must be recorded for reactivation');
+    });
+
+    it('Case 5: Rejects execution by a Demoted Admin', async () => {
+      // 1. Create a temporary admin user
+      const unique = Date.now();
+      const demotedEmail = `demoted_admin_${unique}@test.local`;
+      const createRes = await adminClient.query(
+        `INSERT INTO public.users (email, password_hash, role, is_active)
+         VALUES ($1, 'hash_placeholder', 'admin', true)
+         RETURNING id`,
+        [demotedEmail]
+      );
+      const demotedAdminId = createRes.rows[0].id;
+
+      // 2. Demote the admin to 'customer' in public.users
+      await adminClient.query(
+        "UPDATE public.users SET role = 'customer' WHERE id = $1",
+        [demotedAdminId]
+      );
+
+      const before = await getTargetUserState(userC.id);
+
+      // 3. Demoted admin attempts to call setUserStatus claiming admin
+      await assert.rejects(
+        async () => {
+          await setUserStatus(demotedAdminId, userC.id, false, 'Demoted admin unauthorized attempt');
+        },
+        (err) => /Assertion role admin does not match authoritative database role customer/.test(err.message) ||
+                 /Caller is not an active administrator in database/.test(err.message) ||
+                 /Only an administrator can modify user status/.test(err.message)
+      );
+
+      const after = await getTargetUserState(userC.id);
+      assert.equal(after.isActive, before.isActive, 'Target user is_active must remain unchanged');
+      assert.equal(after.auditCount, before.auditCount, 'Zero audit logs must be inserted on rejection');
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // 31. Business Refusal Helper Security & Actor Forgery Prevention
+  // ---------------------------------------------------------------------------
+  it('31. Business refusal helper security: direct execution denied to app role and actor derived from verified session', async () => {
+    // 1. Direct invocation attempt by ledgerline_app must be rejected at PostgreSQL grant level (SQLSTATE 42501)
+    await assert.rejects(
+      async () => {
+        // query() connects as runtime application role ledgerline_app
+        await query('SELECT public.record_business_refusal($1, $2)', [
+          '00000000-0000-0000-0000-000000000001',
+          'FORGED_REFUSAL',
+        ]);
+      },
+      (err) => err.code === '42501' || /permission denied for function record_business_refusal/.test(err.message)
+    );
+
+    // 2. Direct invocation on privileged connection without active session must be rejected with SQLSTATE 28000
+    await assert.rejects(
+      async () => {
+        await adminClient.query('SELECT public.record_business_refusal($1, $2)', [
+          '00000000-0000-0000-0000-000000000001',
+          'FORGED_REFUSAL',
+        ]);
+      },
+      (err) => err.code === '28000' || /Refusal recording requires an active verified session context/.test(err.message)
+    );
+
+    // 3. Verify that old 4-argument overload accepting caller-supplied actor identity has been completely dropped
+    await assert.rejects(
+      async () => {
+        await adminClient.query(
+          'SELECT public.record_business_refusal($1, $2, $3, $4)',
+          [
+            '00000000-0000-0000-0000-000000000001',
+            'FORGED_REFUSAL',
+            adminUser.id,
+            'admin',
+          ]
+        );
+      },
+      (err) => err.code === '42883' || /function public.record_business_refusal.*does not exist/.test(err.message)
+    );
+  });
+
+  // ---------------------------------------------------------------------------
+  // 32. Session Identity Wrapper Security: ledgerline_app Execution Denied
+  // ---------------------------------------------------------------------------
+  it('32. Session identity wrapper security: direct execution of claim_session_identity denied to ledgerline_app', async () => {
+    const dummyNonce = '00000000-0000-0000-0000-000000000001';
+    const dummySignature = Buffer.from('test_signature_bytes');
+
+    await assert.rejects(
+      async () => {
+        // query() connects as runtime application role ledgerline_app
+        await query('SELECT ledger_secure.claim_session_identity($1, $2)', [
+          dummyNonce,
+          dummySignature,
+        ]);
+      },
+      (err) => err.code === '42501' || /permission denied for function claim_session_identity/.test(err.message)
     );
   });
 });

@@ -213,7 +213,7 @@ export async function processTransactionRequest({
 export async function getTransactionById({ userId, role, transactionId }) {
   return executeWithSession(userId, role, async (client) => {
     const txRes = await client.query(
-      `SELECT id, idempotency_key, type, status, amount_paise, currency,
+      `SELECT id, type, status, amount_paise, currency,
               source_account_id, destination_account_id, created_by,
               original_transaction_id, refusal_reason, created_at, updated_at
          FROM public.transactions

@@ -78,8 +78,19 @@ BEGIN
     v_current_user_id := ledger_secure.current_verified_user_id();
     v_current_role := ledger_secure.current_verified_user_role();
 
-    IF v_current_role != 'admin' THEN
+    IF v_current_user_id IS NULL OR v_current_role IS DISTINCT FROM 'admin' THEN
         RAISE EXCEPTION 'Only an administrator can modify user status'
+            USING ERRCODE = '42501';
+    END IF;
+
+    -- Authoritative database check: Verify caller is still an active admin in public.users
+    IF NOT EXISTS (
+        SELECT 1 FROM public.users
+         WHERE id = v_current_user_id
+           AND role = 'admin'
+           AND is_active = true
+    ) THEN
+        RAISE EXCEPTION 'Caller is not an active administrator in database'
             USING ERRCODE = '42501';
     END IF;
 
@@ -367,7 +378,7 @@ $$ LANGUAGE plpgsql SECURITY DEFINER
 SET search_path = pg_catalog, public, ledger_secure, pg_temp;
 ALTER FUNCTION ledger_secure.establish_session_identity(UUID, BYTEA) OWNER TO ledgerline_owner;
 
--- 5c. Backward Compatibility Wrapper for claim_session_identity
+-- 5c. Restricted Wrapper for claim_session_identity (Revoked from App and Public)
 CREATE OR REPLACE FUNCTION ledger_secure.claim_session_identity(
     p_nonce UUID,
     p_signature BYTEA
@@ -379,6 +390,9 @@ END;
 $$ LANGUAGE plpgsql SECURITY DEFINER
 SET search_path = pg_catalog, public, ledger_secure, pg_temp;
 ALTER FUNCTION ledger_secure.claim_session_identity(UUID, BYTEA) OWNER TO ledgerline_owner;
+REVOKE ALL ON FUNCTION ledger_secure.claim_session_identity(UUID, BYTEA) FROM PUBLIC;
+REVOKE ALL ON FUNCTION ledger_secure.claim_session_identity(UUID, BYTEA) FROM ledgerline_app;
+GRANT EXECUTE ON FUNCTION ledger_secure.claim_session_identity(UUID, BYTEA) TO ledgerline_owner;
 
 -- 6. Explicit Session Context Cleanup Procedure
 CREATE OR REPLACE FUNCTION ledger_secure.clear_session_identity(p_txid BIGINT DEFAULT NULL)
@@ -510,17 +524,17 @@ BEGIN
 
     -- Authorization Matrix
     IF p_new_status = 'frozen' THEN
-        IF v_current_role != 'admin' AND NOT ledger_secure.is_account_holder(p_account_id) THEN
+        IF (v_current_role IS DISTINCT FROM 'admin') AND NOT ledger_secure.is_account_holder(p_account_id) THEN
             RAISE EXCEPTION 'Only an administrator or active account_holder may freeze an account'
                 USING ERRCODE = '42501';
         END IF;
     ELSIF p_new_status = 'active' THEN
-        IF v_current_role != 'admin' THEN
+        IF v_current_role IS DISTINCT FROM 'admin' THEN
             RAISE EXCEPTION 'Only an administrator can unfreeze an account'
                 USING ERRCODE = '42501';
         END IF;
     ELSIF p_new_status = 'closed' THEN
-        IF v_current_role != 'admin' THEN
+        IF v_current_role IS DISTINCT FROM 'admin' THEN
             RAISE EXCEPTION 'Only an administrator can close an account'
                 USING ERRCODE = '42501';
         END IF;
@@ -606,12 +620,12 @@ BEGIN
 
     -- Authorization hierarchy
     IF p_role = 'account_holder' THEN
-        IF v_current_role != 'admin' THEN
+        IF v_current_role IS DISTINCT FROM 'admin' THEN
             RAISE EXCEPTION 'Only an administrator can grant the account_holder role'
                 USING ERRCODE = '42501';
         END IF;
     ELSIF p_role = 'auditor' THEN
-        IF v_current_role != 'admin' AND NOT ledger_secure.is_account_holder(p_account_id) THEN
+        IF (v_current_role IS DISTINCT FROM 'admin') AND NOT ledger_secure.is_account_holder(p_account_id) THEN
             RAISE EXCEPTION 'Only an admin or existing account_holder can assign an auditor'
                 USING ERRCODE = '42501';
         END IF;
@@ -624,7 +638,7 @@ BEGIN
        AND user_id = p_assigned_user_id;
 
     IF FOUND THEN
-        IF v_existing_mem.role = 'account_holder' AND v_current_role != 'admin' THEN
+        IF v_existing_mem.role = 'account_holder' AND (v_current_role IS DISTINCT FROM 'admin') THEN
             RAISE EXCEPTION 'Only an administrator may modify an existing account_holder membership'
                 USING ERRCODE = '42501';
         END IF;
@@ -707,7 +721,7 @@ BEGIN
 
     -- Authorization & final holder protection
     IF v_target_mem.role = 'account_holder' THEN
-        IF v_current_role != 'admin' THEN
+        IF v_current_role IS DISTINCT FROM 'admin' THEN
             RAISE EXCEPTION 'Only an administrator can revoke an account_holder membership'
                 USING ERRCODE = '42501';
         END IF;
@@ -723,7 +737,7 @@ BEGIN
                 USING ERRCODE = '25000';
         END IF;
     ELSIF v_target_mem.role = 'auditor' THEN
-        IF v_current_role != 'admin' AND NOT ledger_secure.is_account_holder(p_account_id) THEN
+        IF (v_current_role IS DISTINCT FROM 'admin') AND NOT ledger_secure.is_account_holder(p_account_id) THEN
             RAISE EXCEPTION 'Only an admin or account_holder can revoke an auditor membership'
                 USING ERRCODE = '42501';
         END IF;

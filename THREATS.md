@@ -1,70 +1,89 @@
 # LedgerLine — Threat Model & Security Posture
 
-This document establishes the threat modeling framework, security baseline, and mitigation strategies for **LedgerLine**, a secure financial transaction management system.
+This document establishes the threat modeling framework, security baseline, mitigation strategies, and residual risks for **LedgerLine**, a secure financial transaction management system.
 
 ---
 
 ## 1. Scope & Objective
 
-LedgerLine is designed to process and record financial transactions with strict consistency, auditability, and resilience against malicious tampering or system failure.
+LedgerLine is designed to process and record financial transactions with strict consistency, auditability, and resilience against malicious tampering, concurrency anomalies, or system failure.
 
-The initial baseline establishes:
-- Strict separation of layers (Routing, Controllers, Services, Repositories, Validators).
-- Transport-level and HTTP-header security.
-- Controlled database access with connection pooling.
-- Input validation and sanitization.
-- Non-repudiation and immutable transaction records (future implementation).
+The architectural baseline enforces:
+- Layered defense: Routing $\to$ Controllers $\to$ Services $\to$ Database-Enforced Security.
+- Principle of least privilege across application and database roles.
+- Deterministic concurrency control eliminating deadlocks and double spending.
+- Non-repudiation and immutable transaction records.
+- Complete anti-replay protection surviving transaction rollbacks.
+- Zero floating-point arithmetic across frontend and backend tiers.
 
 ---
 
 ## 2. Threat Modeling Framework: STRIDE Analysis
 
-| Threat Category | Potential Risk in LedgerLine | Baseline Mitigation Strategy |
+| Threat Category | Potential Risk in LedgerLine | Implemented Mitigation Strategy |
 | :--- | :--- | :--- |
-| **Spoofing** | Impersonation of legitimate users or services attempting unauthorized operations. | Multi-factor authentication, secure session/token handling, cryptographic identity verification (*to be implemented in Auth phase*). |
-| **Tampering** | Modification of financial transaction data, account balances, or audit trails. | Double-entry bookkeeping invariants, parameterized SQL queries via `pg`, row-level immutability, cryptographic checksums. |
-| **Repudiation** | An actor denies executing a financial transaction or system transfer. | Append-only audit logs, transactional event history, signed audit trails. |
-| **Information Disclosure** | Leakage of account numbers, balances, PII, internal stack traces, or credentials. | Sanitized central error handler (stack traces hidden from clients in production), Helmet security headers, strict `.env` segregation. |
-| **Denial of Service (DoS)** | Exhaustion of database connection pools, memory exhaustion via unbounded payload sizes. | Express JSON payload limits (`limit: '10kb'`), PostgreSQL connection pool limits (`max: 20`), timeout guards, rate limiting middleware (*future*). |
-| **Elevation of Privilege** | An unauthorized actor escalating roles to perform administrative or cross-account transfers. | Role-based access control (RBAC), principle of least privilege in PostgreSQL database user permissions. |
+| **Spoofing** | Impersonation of legitimate users or forging database session identity. | Cryptographic HMAC assertions with 30s expiry and single-use nonce; verified database session context bound to `(pg_backend_pid(), txid_current())`; scrypt password hashing; admin action attribution verifying authoritative database role in real time. |
+| **Tampering** | Modifying transaction amounts, mutating historical postings, altering account balances. | Double-entry zero-sum ledgering ($\sum \Delta = 0$); integer paise arithmetic (`BIGINT`); append-only triggers on `ledger_postings` and `audit_logs`; `trg_protect_finalized_transactions` preventing update/deletion of posted/refused transactions; deferred balance reconciliation at commit; frontend string-based BigInt parsing preventing floating-point rounding. |
+| **Repudiation** | An actor denies executing a financial transaction or administrative action. | Immutable audit log trail with verified actor ID, authoritative role, timestamp, and metadata; cryptographic request payload hashing with RFC 8785 canonicalization. |
+| **Information Disclosure** | Leakage of balances, transaction history, credentials, or PII. | PostgreSQL `FORCE ROW LEVEL SECURITY` across all 7 domain tables; non-recursive RLS helpers; posting RLS strictly preventing cross-account leakage; sanitized error handler masking internal errors; automatic token clearance on session expiry. |
+| **Denial of Service (DoS)** | Deadlocks on concurrent transfers, replay storms, connection pool exhaustion. | Deterministic ascending UUID account locking; request idempotency reservation with cached replay; 3s database lock timeout; advisory locking on migrations (`pg_advisory_lock`); connection discard (`client.release(true)`) preventing pool contamination on unconfirmed cleanup. |
+| **Elevation of Privilege** | Runtime application role modifying permissions, bypassing RLS, or creating admin accounts. | `ledgerline_owner` is `NOLOGIN`, `NOSUPERUSER`, `NOBYPASSRLS`; `ledgerline_app` has strictly read-mostly table grants; direct `UPDATE` on `idempotency_keys` revoked; user registration restricted to `customer` role; demoted/stale JWTs blocked by database assertion checks. |
 
 ---
 
 ## 3. Financial Integrity Principles
 
-1. **No Floating-Point Arithmetic**:
-   - Floating-point representations (e.g., IEEE 754 standard floats/doubles) suffer from precision rounding errors (`0.1 + 0.2 !== 0.3`).
-   - All financial amounts must strictly be represented as **integer cents / minor currency units** (e.g., `1000` cents = `$10.00`) or PostgreSQL `NUMERIC` / `DECIMAL` types with fixed decimal precision.
-2. **ACID Transaction Guarantees**:
-   - Every financial state change must execute within explicit database transactions (`BEGIN ... COMMIT / ROLLBACK`) with isolation level guards to prevent race conditions (e.g., Double Spending).
-3. **Defense in Depth**:
-   - Every incoming request must be validated at the boundary via schemas (Zod).
-   - Strict parameterized SQL statements must be used across all repositories—no string interpolation or dynamic SQL concatenation.
+1. **Integer Paise Arithmetic (Zero Floating-Point Operations)**:
+   - Floating-point representations (IEEE 754) suffer from precision rounding errors (`0.1 + 0.2 !== 0.3` and `10.55 * 100 === 1054.9999999999998`).
+   - All financial amounts are strictly represented and calculated in minor currency units (**integer paise**, `BIGINT`, where ₹1.00 = 100 paise).
+   - The frontend parses decimal inputs using string-splitting and BigInt math (`rupeesToPaise`), never passing floats over the wire.
+   - The backend validates integers within PostgreSQL `BIGINT` range, rejecting negatives, floats, fractions, and unsafe JavaScript integers.
+2. **Double-Entry Invariant**:
+   - Every posted transaction must produce exactly two balanced postings: one debit and one credit of identical magnitude ($\text{debit} + \text{credit} = 0$).
+   - Refused transactions produce exactly zero postings.
+3. **Deferred Balance Reconciliation**:
+   - A deferred constraint trigger evaluates at `COMMIT` time under exclusive account locks.
+   - Re-reads live rows from `public.transactions` and validates that `cached_balance == SUM(signed_amount_paise)` across all postings.
 
 ---
 
-## 4. Current Foundation & Phase 2 Implemented Controls
+## 4. Phase 2 & 3 Remediation Controls
 
-- [x] **Environment Secrets Management**: Credentials stored strictly in `.env` files; excluded from Git via `.gitignore`.
-- [x] **HTTP Header Hardening**: Helmet middleware integrated to enforce CSP, HSTS, X-Content-Type-Options, etc.
-- [x] **CORS Isolation**: Explicit origin configuration restricting frontend API access to authorized origin (`CLIENT_ORIGIN`).
-- [x] **Sanitized Error Responses**: Central error middleware captures unexpected exceptions, logs internally, and returns uniform non-leaking JSON responses.
-- [x] **Parameterized Database Queries**: Node PostgreSQL driver (`pg`) connection pool with query parameterization.
-- [x] **FORCE Row-Level Security (RLS)**: Enforced across all tables in `public` with non-recursive security helpers.
-- [x] **Two-Phase Single-Use HMAC Identity Assertions**: Pre-consumed in dedicated committed transaction surviving financial rollbacks.
-- [x] **Real-Time Database Role & Suspension Checks**: Rejects deactivated users and stale JWT roles in real time.
-- [x] **Atomic Double-Entry Ledger**: Exactly 2 balanced postings per posted transaction, integer paise only, append-only triggers.
-- [x] **Deferred Commit Validator & Balance Reconciliation**: Re-reads final row state and reconciles cached balance against posting sum under lock.
-- [x] **Parent Account Row Locking**: Serializes membership modifications and account status changes, preventing final holder revocation.
-- [x] **Deterministic Ascending UUID Locking**: Eliminates deadlocks on concurrent opposite-direction transfers.
-- [x] **Full Idempotency Protection**: Unique transaction binding, method/path/payload validation, and cached exact replay.
+1. **Credential & Secret De-Hardening**:
+   - Removed all hardcoded database passwords from migration SQL (`001_schemas_roles_extensions.sql`).
+   - Removed hardcoded HMAC secrets and default admin password hashes from seed SQL (`001_initial_seed.sql`).
+   - Removed fallback secrets from application configuration (`env.js`); startup validation mandates 64-hex-character HMAC keys and $\ge 32$-character JWT secrets.
+   - Production validation prevents empty or defaulted `DB_PASSWORD`, `ADMIN_DB_USER`, `ADMIN_DB_PASSWORD`, and `INITIAL_ADMIN_PASSWORD`.
+   - Removed hardcoded password bypasses from `verifyPassword()`.
+   - Implemented `server/scripts/bootstrap.js` provisioning runtime role passwords, versioned HMAC secrets, and admin accounts hashed via `scrypt`.
+2. **Three-Stage Assertion Replay Protection**:
+   - **Phase 1 (Committed Independently)**: Registers HMAC assertion and consumes it (`status = 'CONSUMED'`). This commits immediately.
+   - **Phase 2 (Financial Isolation)**: Begins financial transaction on the same client / PID, establishes session context in `active_session_contexts`, marks assertion `BOUND`.
+   - **Rollback Resilience**: If Phase 2 aborts and rolls back, Phase 1's consumption remains committed to disk. Replaying the assertion is permanently rejected.
+3. **Connection Pool Contamination Defense**:
+   - Session context cleanup executes post-commit and post-rollback using dual identifiers: backend PID and financial transaction ID (`ledger_secure.clear_session_identity`).
+   - If cleanup throws or cannot be verified, `sessionContext.js` calls `client.release(true)`, which terminates and discards the socket from the pool.
+4. **Admin Action Attribution & Role Freshness**:
+   - `auth.service.js` executes `setUserStatus` within `executeWithSession(adminUserId, 'admin', ...)`.
+   - Assertion registration checks current database status and role against `public.users`. Stale or demoted JWTs are rejected.
+   - Audit logs permanently record the verified administrator actor ID, action (`USER_STATUS_CHANGED`), timestamp, and reason metadata.
+5. **Finalized Transaction Immutability**:
+   - Database trigger `trg_protect_finalized_transactions` blocks any `UPDATE` or `DELETE` on transactions with status `posted` or `refused`.
+   - Prevents alteration of amount, currency, endpoints, type, or creator during pending-to-finalized transitions.
+6. **Client-Side Idempotency & Replay Resiliency**:
+   - Client generates standard UUID v4 idempotency keys per operation.
+   - Retries preserve the key to avoid duplicate debits.
+   - The UI detects `Idempotent-Replay` HTTP response headers and explicitly notifies the operator.
 
 ---
 
-## 5. Security Checklist for Subsequent Iterations (Phase 3 & 4)
+## 5. Known Limitations and Residual Risks
 
-- [ ] Rate limiting on API routes (`express-rate-limit`).
-- [ ] Hardware MFA / WebAuthn integration for administrative accounts.
-- [ ] CSRF protection for browser cookie sessions.
-- [ ] Automated range table partitioning by `created_at` for high-throughput scaling.
-
+1. **PostgreSQL Superuser Authority**:
+   - Administrative superusers (`postgres`) can bypass RLS via `BYPASSRLS`. Production deployments must enforce IAM authentication, restrict superuser access, and enable audit logging via `pgaudit`.
+2. **Application Process Memory / RCE**:
+   - The application tier holds active HMAC and JWT secrets in memory. A Remote Code Execution vulnerability in Node.js could allow memory extraction. Production environments should delegate cryptographic signing to cloud KMS or HSM.
+3. **Monotonic Table Growth**:
+   - As an append-only system, `ledger_postings` and `audit_logs` grow monotonically. Production scaling requires table partitioning by range on `created_at`.
+4. **Idempotency Key Retention**:
+   - Idempotency records are currently retained indefinitely. A scheduled background cleanup job should prune expired keys older than the idempotency retention window (e.g., 48 hours).

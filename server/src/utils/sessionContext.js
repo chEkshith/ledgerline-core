@@ -27,6 +27,8 @@ import { generateHmacAssertion } from './crypto.js';
 export async function executeWithSession(userId, role, callback) {
   const client = await pool.connect();
   let financialTxid = null;
+  let backendPid = null;
+  let discardClient = false;
 
   try {
     // Generate fresh HMAC assertion
@@ -47,7 +49,7 @@ export async function executeWithSession(userId, role, callback) {
       );
       await client.query('COMMIT');
     } catch (regErr) {
-      await client.query('ROLLBACK').catch(() => {});
+      await client.query('ROLLBACK').catch(() => { });
       throw regErr;
     }
 
@@ -56,6 +58,10 @@ export async function executeWithSession(userId, role, callback) {
     // -------------------------------------------------------------------------
     await client.query('BEGIN');
     await client.query("SET LOCAL lock_timeout = '3s'");
+
+    // Capture backend PID
+    const pidRes = await client.query('SELECT pg_backend_pid() AS pid');
+    backendPid = pidRes.rows[0].pid;
 
     // Establish verified session context using the already-consumed assertion
     await client.query(
@@ -74,31 +80,47 @@ export async function executeWithSession(userId, role, callback) {
     await client.query('COMMIT');
 
     // Post-Commit Cleanup using captured transaction ID
-    if (financialTxid) {
-      await client.query(
-        'SELECT ledger_secure.clear_session_identity($1::bigint)',
-        [financialTxid]
-      ).catch(() => {});
+    try {
+      if (financialTxid) {
+        await client.query(
+          'SELECT ledger_secure.clear_session_identity($1::bigint)',
+          [financialTxid]
+        );
+      } else {
+        await client.query('SELECT ledger_secure.clear_session_identity()');
+      }
+    } catch (cleanupErr) {
+      console.error('[SessionContext] Post-commit cleanup failed; discarding client:', cleanupErr.message);
+      discardClient = true;
     }
 
     return result;
   } catch (err) {
     // Financial transaction rollback
-    await client.query('ROLLBACK').catch(() => {});
+    await client.query('ROLLBACK').catch(() => { });
 
     // Post-Rollback Cleanup using captured transaction ID or backend PID
-    if (financialTxid) {
-      await client.query(
-        'SELECT ledger_secure.clear_session_identity($1::bigint)',
-        [financialTxid]
-      ).catch(() => {});
-    } else {
-      await client.query('SELECT ledger_secure.clear_session_identity()').catch(() => {});
+    try {
+      if (financialTxid) {
+        await client.query(
+          'SELECT ledger_secure.clear_session_identity($1::bigint)',
+          [financialTxid]
+        );
+      } else {
+        await client.query('SELECT ledger_secure.clear_session_identity()');
+      }
+    } catch (cleanupErr) {
+      console.error('[SessionContext] Post-rollback cleanup failed; discarding client:', cleanupErr.message);
+      discardClient = true;
     }
 
     throw err;
   } finally {
-    // Release connection back to pool
-    client.release();
+    // If cleanup failed or context could be corrupted, destroy connection instead of returning to pool
+    if (discardClient) {
+      client.release(true);
+    } else {
+      client.release();
+    }
   }
 }

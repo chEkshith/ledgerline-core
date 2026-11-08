@@ -96,17 +96,28 @@ $$ LANGUAGE plpgsql SECURITY DEFINER
 SET search_path = pg_catalog, public, ledger_secure, pg_temp;
 ALTER FUNCTION public.create_pending_financial_transaction(VARCHAR, VARCHAR, BIGINT, UUID, UUID, UUID) OWNER TO ledgerline_owner;
 
--- 2. Business Refusal Recording Helper
+-- 2. Business Refusal Recording Helper (Derives Actor Directly From Verified Session Identity)
+DROP FUNCTION IF EXISTS public.record_business_refusal(UUID, VARCHAR, UUID, VARCHAR);
+
 CREATE OR REPLACE FUNCTION public.record_business_refusal(
     p_transaction_id UUID,
-    p_reason VARCHAR(255),
-    p_actor_id UUID,
-    p_actor_role VARCHAR(20)
+    p_reason VARCHAR(255)
 ) RETURNS JSONB AS $$
 DECLARE
+    v_current_user_id UUID;
+    v_current_role VARCHAR;
     v_result JSONB;
     v_rows INT;
 BEGIN
+    -- Derive actor identity strictly from verified database context to prevent parameter forgery
+    v_current_user_id := ledger_secure.current_verified_user_id();
+    v_current_role := ledger_secure.current_verified_user_role();
+
+    IF v_current_user_id IS NULL THEN
+        RAISE EXCEPTION 'Refusal recording requires an active verified session context'
+            USING ERRCODE = '28000';
+    END IF;
+
     UPDATE public.transactions
        SET status = 'refused',
            refusal_reason = p_reason,
@@ -134,6 +145,7 @@ BEGIN
             p_transaction_id, v_rows USING ERRCODE = '55000';
     END IF;
 
+    -- Actor identity recorded in audit log is authentic and non-forgeable
     INSERT INTO public.audit_logs (
         actor_id,
         actor_role,
@@ -142,8 +154,8 @@ BEGIN
         entity_id,
         metadata
     ) VALUES (
-        p_actor_id,
-        p_actor_role,
+        v_current_user_id,
+        v_current_role,
         'TRANSACTION_REFUSED',
         'transaction',
         p_transaction_id,
@@ -154,7 +166,10 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER
 SET search_path = pg_catalog, public, ledger_secure, pg_temp;
-ALTER FUNCTION public.record_business_refusal(UUID, VARCHAR, UUID, VARCHAR) OWNER TO ledgerline_owner;
+ALTER FUNCTION public.record_business_refusal(UUID, VARCHAR) OWNER TO ledgerline_owner;
+REVOKE ALL ON FUNCTION public.record_business_refusal(UUID, VARCHAR) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.record_business_refusal(UUID, VARCHAR) FROM ledgerline_app;
+GRANT EXECUTE ON FUNCTION public.record_business_refusal(UUID, VARCHAR) TO ledgerline_owner;
 
 -- 3. Unified Financial Transaction Execution Engine
 CREATE OR REPLACE FUNCTION public.process_financial_transaction(
@@ -201,7 +216,7 @@ BEGIN
             p_transaction_id, v_tx.status USING ERRCODE = '25000';
     END IF;
 
-    IF v_current_role != 'admin' AND v_tx.created_by != v_current_user_id THEN
+    IF (v_current_role IS DISTINCT FROM 'admin') AND v_tx.created_by != v_current_user_id THEN
         RAISE EXCEPTION 'Caller % is not authorized to execute transaction created by %',
             v_current_user_id, v_tx.created_by USING ERRCODE = '42501';
     END IF;
@@ -236,7 +251,7 @@ BEGIN
 
     -- 4. Reversal Integrity Validation
     IF v_tx.type = 'reversal' THEN
-        IF v_current_role != 'admin' THEN
+        IF v_current_role IS DISTINCT FROM 'admin' THEN
             RAISE EXCEPTION 'Only administrators may execute transaction reversals' USING ERRCODE = '42501';
         END IF;
 
@@ -250,7 +265,7 @@ BEGIN
         END IF;
 
         IF v_orig_tx.status != 'posted' THEN
-            RETURN public.record_business_refusal(p_transaction_id, 'ORIGINAL_TRANSACTION_NOT_POSTED', v_current_user_id, v_current_role);
+            RETURN public.record_business_refusal(p_transaction_id, 'ORIGINAL_TRANSACTION_NOT_POSTED');
         END IF;
 
         IF v_orig_tx.type = 'reversal' THEN
@@ -274,7 +289,7 @@ BEGIN
                AND status = 'posted'
                AND id != p_transaction_id
         ) THEN
-            RETURN public.record_business_refusal(p_transaction_id, 'ALREADY_REVERSED', v_current_user_id, v_current_role);
+            RETURN public.record_business_refusal(p_transaction_id, 'ALREADY_REVERSED');
         END IF;
     END IF;
 
@@ -292,11 +307,11 @@ BEGIN
 
     -- 6. Account Status Business Checks
     IF v_source_acc.status != 'active' THEN
-        RETURN public.record_business_refusal(p_transaction_id, 'SOURCE_ACCOUNT_' || UPPER(v_source_acc.status), v_current_user_id, v_current_role);
+        RETURN public.record_business_refusal(p_transaction_id, 'SOURCE_ACCOUNT_' || UPPER(v_source_acc.status));
     END IF;
 
     IF v_dest_acc.status != 'active' THEN
-        RETURN public.record_business_refusal(p_transaction_id, 'DESTINATION_ACCOUNT_' || UPPER(v_dest_acc.status), v_current_user_id, v_current_role);
+        RETURN public.record_business_refusal(p_transaction_id, 'DESTINATION_ACCOUNT_' || UPPER(v_dest_acc.status));
     END IF;
 
     -- 7. Endpoint Role Validations
@@ -322,7 +337,7 @@ BEGIN
 
     -- 8. Mandatory Account Authorization (Addressing Requirement 2.C)
     -- Deposit: Caller must be an authorized account_holder of destination customer account, or admin
-    IF v_tx.type = 'deposit' AND v_current_role != 'admin' THEN
+    IF v_tx.type = 'deposit' AND (v_current_role IS DISTINCT FROM 'admin') THEN
         IF NOT EXISTS (
             SELECT 1 
               FROM public.account_memberships
@@ -336,7 +351,7 @@ BEGIN
     END IF;
 
     -- Withdrawal: Caller must be an authorized account_holder of source customer account, or admin
-    IF v_tx.type = 'withdrawal' AND v_current_role != 'admin' THEN
+    IF v_tx.type = 'withdrawal' AND (v_current_role IS DISTINCT FROM 'admin') THEN
         IF NOT EXISTS (
             SELECT 1 
               FROM public.account_memberships
@@ -350,7 +365,7 @@ BEGIN
     END IF;
 
     -- Transfer: Caller must be an authorized account_holder of source customer account, or admin
-    IF v_tx.type = 'transfer' AND v_current_role != 'admin' THEN
+    IF v_tx.type = 'transfer' AND (v_current_role IS DISTINCT FROM 'admin') THEN
         IF NOT EXISTS (
             SELECT 1 
               FROM public.account_memberships
@@ -365,7 +380,7 @@ BEGIN
 
     -- 9. Balance Availability Check (Customer Accounts Cannot Overdraw)
     IF v_source_acc.account_type = 'customer' AND v_source_acc.current_balance < v_tx.amount_paise THEN
-        RETURN public.record_business_refusal(p_transaction_id, 'INSUFFICIENT_FUNDS', v_current_user_id, v_current_role);
+        RETURN public.record_business_refusal(p_transaction_id, 'INSUFFICIENT_FUNDS');
     END IF;
 
     -- 10. INSERT Exactly Two Ledger Postings

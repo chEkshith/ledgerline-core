@@ -159,7 +159,7 @@ $$ LANGUAGE plpgsql SECURITY DEFINER
 SET search_path = pg_catalog, public, ledger_secure, pg_temp;
 ALTER FUNCTION ledger_secure.establish_session_identity(UUID, BYTEA) OWNER TO ledgerline_owner;
 
--- 4. Procedure: Compatibility wrapper for claim_session_identity
+-- 4. Procedure: Restricted wrapper for claim_session_identity
 CREATE OR REPLACE FUNCTION ledger_secure.claim_session_identity(
     p_nonce UUID,
     p_signature BYTEA
@@ -171,6 +171,9 @@ END;
 $$ LANGUAGE plpgsql SECURITY DEFINER
 SET search_path = pg_catalog, public, ledger_secure, pg_temp;
 ALTER FUNCTION ledger_secure.claim_session_identity(UUID, BYTEA) OWNER TO ledgerline_owner;
+REVOKE ALL ON FUNCTION ledger_secure.claim_session_identity(UUID, BYTEA) FROM PUBLIC;
+REVOKE ALL ON FUNCTION ledger_secure.claim_session_identity(UUID, BYTEA) FROM ledgerline_app;
+GRANT EXECUTE ON FUNCTION ledger_secure.claim_session_identity(UUID, BYTEA) TO ledgerline_owner;
 
 -- 5. Trigger: Finalized Transaction Immutability
 CREATE OR REPLACE FUNCTION public.enforce_transaction_immutability()
@@ -222,4 +225,6 @@ REVOKE UPDATE ON TABLE public.idempotency_keys FROM ledgerline_app;
 
 GRANT EXECUTE ON FUNCTION ledger_secure.consume_identity_assertion(UUID, BYTEA) TO ledgerline_app;
 GRANT EXECUTE ON FUNCTION ledger_secure.establish_session_identity(UUID, BYTEA) TO ledgerline_app;
-GRANT EXECUTE ON FUNCTION ledger_secure.claim_session_identity(UUID, BYTEA) TO ledgerline_app;
+REVOKE ALL ON FUNCTION ledger_secure.claim_session_identity(UUID, BYTEA) FROM PUBLIC;
+REVOKE ALL ON FUNCTION ledger_secure.claim_session_identity(UUID, BYTEA) FROM ledgerline_app;
+GRANT EXECUTE ON FUNCTION ledger_secure.claim_session_identity(UUID, BYTEA) TO ledgerline_owner;
