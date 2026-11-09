@@ -20,7 +20,7 @@ import {
   validateAmountPaise,
 } from '../src/services/transaction.service.js';
 import { executeWithSession } from '../src/utils/sessionContext.js';
-import { generateHmacAssertion } from '../src/utils/crypto.js';
+import { generateHmacAssertion, hashPassword } from '../src/utils/crypto.js';
 
 describe('LedgerLine Phase 2 Comprehensive Test Suite', () => {
   let adminUser;
@@ -2422,5 +2422,624 @@ describe('LedgerLine Phase 2 Comprehensive Test Suite', () => {
       const audAcc = await client.query('SELECT id FROM public.accounts WHERE id = $1', [accountB]);
       assert.equal(audAcc.rowCount, 0, 'Auditor on Account A must not see Customer B account');
     });
+  });
+
+  // ---------------------------------------------------------------------------
+  // 49. Adversarial Idempotency: 10 Simultaneous Identical Requests
+  // ---------------------------------------------------------------------------
+  it('49. Adversarial Idempotency: 10 Simultaneous Identical Requests Produce Exactly One Execution and 9 Replays', async () => {
+    const key10 = `key10_conc_${Date.now()}`;
+    const payload10 = {
+      type: 'transfer',
+      amountPaise: 15000, // ₹150.00
+      sourceAccountId: accountA,
+      destinationAccountId: accountB,
+    };
+
+    const startBalA = (await adminClient.query('SELECT current_balance FROM public.accounts WHERE id = $1', [accountA])).rows[0].current_balance;
+    const startBalB = (await adminClient.query('SELECT current_balance FROM public.accounts WHERE id = $1', [accountB])).rows[0].current_balance;
+
+    const promises10 = Array.from({ length: 10 }, () =>
+      processTransactionRequest({
+        userId: customerA.id,
+        role: 'customer',
+        idempotencyKey: key10,
+        method: 'POST',
+        path: '/api/transactions',
+        body: payload10,
+      })
+    );
+
+    const results10 = await Promise.all(promises10);
+    assert.equal(results10.length, 10, 'All 10 requests must settle');
+
+    // All must be HTTP 200 and identify the same transaction ID
+    const firstTxId = results10[0].body.transaction_id;
+    for (let i = 0; i < 10; i++) {
+      assert.equal(results10[i].statusCode, 200, `Request ${i} must return HTTP 200`);
+      assert.equal(results10[i].body.transaction_id, firstTxId, `Request ${i} must return identical transaction ID`);
+    }
+
+    // Exactly 1 initial execution and 9 idempotent replays
+    const initialExecutions = results10.filter((r) => !r.isIdempotentReplay);
+    const replayedExecutions = results10.filter((r) => r.isIdempotentReplay);
+    assert.equal(initialExecutions.length, 1, 'Exactly 1 request must be the initial execution');
+    assert.equal(replayedExecutions.length, 9, 'Exactly 9 requests must be marked as idempotent replays');
+
+    // Exactly 1 transaction row in database
+    const txCount = await adminClient.query('SELECT count(*) FROM public.transactions WHERE id = $1', [firstTxId]);
+    assert.equal(parseInt(txCount.rows[0].count, 10), 1, 'Exactly 1 transaction row must exist in database');
+
+    // Exactly 2 ledger postings in database
+    const postCount = await adminClient.query('SELECT count(*) FROM public.ledger_postings WHERE transaction_id = $1', [firstTxId]);
+    assert.equal(parseInt(postCount.rows[0].count, 10), 2, 'Exactly 2 ledger postings must exist in database');
+
+    // Exact balance debit and credit without duplicates
+    const endBalA = (await adminClient.query('SELECT current_balance FROM public.accounts WHERE id = $1', [accountA])).rows[0].current_balance;
+    const endBalB = (await adminClient.query('SELECT current_balance FROM public.accounts WHERE id = $1', [accountB])).rows[0].current_balance;
+    assert.equal(BigInt(endBalA), BigInt(startBalA) - 15000n, 'Source account must be debited exactly once (15000 paise)');
+    assert.equal(BigInt(endBalB), BigInt(startBalB) + 15000n, 'Destination account must be credited exactly once (15000 paise)');
+  });
+
+  // ---------------------------------------------------------------------------
+  // 50. Adversarial Idempotency: Simultaneous Conflict Race (Different Payloads)
+  // ---------------------------------------------------------------------------
+  it('50. Adversarial Idempotency: Simultaneous Key Race with Conflicting Payloads Rejects Loser with HTTP 409', async () => {
+    const conflictKey = `key_race_diff_${Date.now()}`;
+    const payload1 = {
+      type: 'transfer',
+      amountPaise: 20000,
+      sourceAccountId: accountA,
+      destinationAccountId: accountB,
+    };
+    const payload2 = {
+      type: 'transfer',
+      amountPaise: 30000, // Conflicting amount
+      sourceAccountId: accountA,
+      destinationAccountId: accountB,
+    };
+
+    const resultsConflict = await Promise.allSettled([
+      processTransactionRequest({
+        userId: customerA.id,
+        role: 'customer',
+        idempotencyKey: conflictKey,
+        method: 'POST',
+        path: '/api/transactions',
+        body: payload1,
+      }),
+      processTransactionRequest({
+        userId: customerA.id,
+        role: 'customer',
+        idempotencyKey: conflictKey,
+        method: 'POST',
+        path: '/api/transactions',
+        body: payload2,
+      }),
+    ]);
+
+    const fulfilled = resultsConflict.filter((r) => r.status === 'fulfilled');
+    const rejected = resultsConflict.filter((r) => r.status === 'rejected');
+
+    assert.equal(fulfilled.length, 1, 'Exactly one payload must own the key and succeed');
+    assert.equal(rejected.length, 1, 'The conflicting payload must be rejected');
+    assert.equal(rejected[0].reason.status, 409, 'Conflict status must be HTTP 409');
+    assert.match(
+      rejected[0].reason.message,
+      /Idempotency key re-used with different request parameters or payload|currently in progress/,
+      'Rejected request must report idempotency payload conflict'
+    );
+  });
+
+  // ---------------------------------------------------------------------------
+  // 51. Adversarial Idempotency: Retry After Failure Before Commit
+  // ---------------------------------------------------------------------------
+  it('51. Adversarial Idempotency: Failed Pre-Commit Operation Leaves No Residue and Retries Cleanly', async () => {
+    const retryKey = `key_retry_fail_${Date.now()}`;
+
+    // 1. Trigger failure before commit: invalid destination endpoint for transfer
+    let failed = false;
+    try {
+      await processTransactionRequest({
+        userId: customerA.id,
+        role: 'customer',
+        idempotencyKey: retryKey,
+        method: 'POST',
+        path: '/api/transactions',
+        body: {
+          type: 'transfer',
+          amountPaise: 5000,
+          sourceAccountId: accountA,
+          destinationAccountId: vaultAccount.id, // System vault cannot be transfer destination -> raises 22023!
+        },
+      });
+    } catch (err) {
+      failed = true;
+      assert.match(err.message, /Transfer endpoints must both be customer accounts/);
+    }
+    assert.ok(failed, 'Pre-commit validation must fail and abort the transaction');
+
+    // 2. Confirm no partial idempotency state remains
+    const idempCheck = await adminClient.query(
+      'SELECT * FROM public.idempotency_keys WHERE user_id = $1 AND idempotency_key = $2',
+      [customerA.id, retryKey]
+    );
+    assert.equal(idempCheck.rowCount, 0, 'Rolled-back transaction must leave no idempotency record');
+
+    // 3. Retry with same key and valid payload succeeds
+    const retryRes = await processTransactionRequest({
+      userId: customerA.id,
+      role: 'customer',
+      idempotencyKey: retryKey,
+      method: 'POST',
+      path: '/api/transactions',
+      body: {
+        type: 'transfer',
+        amountPaise: 5000,
+        sourceAccountId: accountA,
+        destinationAccountId: accountB,
+      },
+    });
+    assert.equal(retryRes.statusCode, 200, 'Legitimate retry must succeed with HTTP 200');
+    assert.equal(retryRes.body.status, 'success');
+  });
+
+  // ---------------------------------------------------------------------------
+  // 52. Concurrent Reversal Protection (Dual Administrator Race)
+  // ---------------------------------------------------------------------------
+  it('52. Concurrent Reversal Protection: Dual Administrator Race Yields Exactly One Compensating Reversal', async () => {
+    // 0. Ensure accountA has sufficient funds
+    await processTransactionRequest({
+      userId: customerA.id,
+      role: 'customer',
+      idempotencyKey: `dep_fund_rev_${Date.now()}`,
+      method: 'POST',
+      path: '/api/transactions',
+      body: {
+        type: 'deposit',
+        amountPaise: 500000, // ₹5,000.00
+        sourceAccountId: vaultAccount.id,
+        destinationAccountId: accountA,
+      },
+    });
+
+    // 1. Provision authentic second administrator
+    const admin2Email = `admin2_rev_${Date.now()}@test.local`;
+    const admin2PwHash = await hashPassword('Admin2Secret@123!');
+    const admin2Res = await adminClient.query(`
+      INSERT INTO public.users (email, password_hash, role, is_active)
+      VALUES ($1, $2, 'admin', true)
+      RETURNING id, email, role
+    `, [admin2Email, admin2PwHash]);
+    const adminUser2 = admin2Res.rows[0];
+
+    // 2. Create posted transfer to reverse
+    const origKey = `orig_transfer_${Date.now()}`;
+    const origTxRes = await processTransactionRequest({
+      userId: customerA.id,
+      role: 'customer',
+      idempotencyKey: origKey,
+      method: 'POST',
+      path: '/api/transactions',
+      body: {
+        type: 'transfer',
+        amountPaise: 10000, // ₹100.00
+        sourceAccountId: accountA,
+        destinationAccountId: accountB,
+      },
+    });
+    const origTxId = origTxRes.body.transaction_id;
+    assert.equal(origTxRes.statusCode, 200);
+
+    const balBeforeRevA = (await adminClient.query('SELECT current_balance FROM public.accounts WHERE id = $1', [accountA])).rows[0].current_balance;
+    const balBeforeRevB = (await adminClient.query('SELECT current_balance FROM public.accounts WHERE id = $1', [accountB])).rows[0].current_balance;
+
+    // 3. Two administrators simultaneously execute reversal with different idempotency keys
+    const revKey1 = `rev_adm1_${Date.now()}`;
+    const revKey2 = `rev_adm2_${Date.now()}`;
+
+    const revResults = await Promise.all([
+      processTransactionRequest({
+        userId: adminUser.id,
+        role: 'admin',
+        idempotencyKey: revKey1,
+        method: 'POST',
+        path: '/api/transactions',
+        body: {
+          type: 'reversal',
+          amountPaise: 10000,
+          sourceAccountId: accountB,
+          destinationAccountId: accountA,
+          originalTransactionId: origTxId,
+        },
+      }),
+      processTransactionRequest({
+        userId: adminUser2.id,
+        role: 'admin',
+        idempotencyKey: revKey2,
+        method: 'POST',
+        path: '/api/transactions',
+        body: {
+          type: 'reversal',
+          amountPaise: 10000,
+          sourceAccountId: accountB,
+          destinationAccountId: accountA,
+          originalTransactionId: origTxId,
+        },
+      }),
+    ]);
+
+    const postedRev = revResults.filter((r) => r.statusCode === 200);
+    const refusedRev = revResults.filter((r) => r.statusCode === 422);
+
+    assert.equal(postedRev.length, 1, 'Exactly one reversal must successfully post');
+    assert.equal(refusedRev.length, 1, 'The losing reversal request must be refused with HTTP 422');
+    assert.equal(refusedRev[0].body.reason, 'ALREADY_REVERSED', 'Refusal reason must be ALREADY_REVERSED');
+
+    // 4. Verify original transaction has not been reversed twice
+    const postedReversals = await adminClient.query(
+      "SELECT count(*) FROM public.transactions WHERE original_transaction_id = $1 AND type = 'reversal' AND status = 'posted'",
+      [origTxId]
+    );
+    assert.equal(parseInt(postedReversals.rows[0].count, 10), 1, 'Exactly one posted reversal record may exist');
+
+    // 5. Total financial effect is correct (restored to initial balances)
+    const balAfterRevA = (await adminClient.query('SELECT current_balance FROM public.accounts WHERE id = $1', [accountA])).rows[0].current_balance;
+    const balAfterRevB = (await adminClient.query('SELECT current_balance FROM public.accounts WHERE id = $1', [accountB])).rows[0].current_balance;
+    assert.equal(BigInt(balAfterRevA), BigInt(balBeforeRevA) + 10000n, 'Account A balance must be restored');
+    assert.equal(BigInt(balAfterRevB), BigInt(balBeforeRevB) - 10000n, 'Account B balance must be restored');
+
+    // 6. Retry with winning key returns original reversal result
+    const winningKey = postedRev[0] === revResults[0] ? revKey1 : revKey2;
+    const winningAdminId = postedRev[0] === revResults[0] ? adminUser.id : adminUser2.id;
+    const retryWinning = await processTransactionRequest({
+      userId: winningAdminId,
+      role: 'admin',
+      idempotencyKey: winningKey,
+      method: 'POST',
+      path: '/api/transactions',
+      body: {
+        type: 'reversal',
+        amountPaise: 10000,
+        sourceAccountId: accountB,
+        destinationAccountId: accountA,
+        originalTransactionId: origTxId,
+      },
+    });
+    assert.equal(retryWinning.statusCode, 200);
+    assert.equal(retryWinning.isIdempotentReplay, true, 'Retry with winning key must be marked as idempotent replay');
+    assert.equal(retryWinning.body.transaction_id, postedRev[0].body.transaction_id);
+
+    // 7. Fresh reversal key is refused
+    const freshRev = await processTransactionRequest({
+      userId: adminUser.id,
+      role: 'admin',
+      idempotencyKey: `rev_fresh_${Date.now()}`,
+      method: 'POST',
+      path: '/api/transactions',
+      body: {
+        type: 'reversal',
+        amountPaise: 10000,
+        sourceAccountId: accountB,
+        destinationAccountId: accountA,
+        originalTransactionId: origTxId,
+      },
+    });
+    assert.equal(freshRev.statusCode, 422);
+    assert.equal(freshRev.body.reason, 'ALREADY_REVERSED');
+
+    // 8. Unauthorized user cannot reverse transactions
+    await assert.rejects(
+      async () => {
+        await processTransactionRequest({
+          userId: customerA.id,
+          role: 'customer',
+          idempotencyKey: `rev_unauth_${Date.now()}`,
+          method: 'POST',
+          path: '/api/transactions',
+          body: {
+            type: 'reversal',
+            amountPaise: 10000,
+            sourceAccountId: accountB,
+            destinationAccountId: accountA,
+            originalTransactionId: origTxId,
+          },
+        });
+      },
+      (err) => /Only administrators may execute transaction reversals/.test(err.message)
+    );
+  });
+
+  // ---------------------------------------------------------------------------
+  // 53. Failure Injection & Atomic Rollback Across Execution Boundaries
+  // ---------------------------------------------------------------------------
+  it('53. Failure Injection & Atomic Rollback: Injected Database Errors Guarantee Zero Financial Residue', async () => {
+    // 0. Ensure accountA has sufficient funds (at least 3,000,000 paise for injected amounts)
+    await processTransactionRequest({
+      userId: customerA.id,
+      role: 'customer',
+      idempotencyKey: `dep_fund_fail_${Date.now()}`,
+      method: 'POST',
+      path: '/api/transactions',
+      body: {
+        type: 'deposit',
+        amountPaise: 5000000, // ₹50,000.00
+        sourceAccountId: vaultAccount.id,
+        destinationAccountId: accountA,
+      },
+    });
+
+    const baseAmt = 880000 + (Date.now() % 10000);
+    const amt1 = baseAmt + 1;
+    const amt2 = baseAmt + 2;
+    const amt3 = baseAmt + 3;
+
+    // Install temporary test-only triggers in ledgerline_test
+    await adminClient.query(`
+      CREATE OR REPLACE FUNCTION public._test_fail_postings_trigger()
+      RETURNS TRIGGER AS $$
+      BEGIN
+          IF NEW.amount_paise = ${amt1} THEN
+              RAISE EXCEPTION 'TEST_INJECTED_FAILURE_DURING_POSTING' USING ERRCODE = 'P0001';
+          END IF;
+          RETURN NEW;
+      END;
+      $$ LANGUAGE plpgsql;
+
+      DROP TRIGGER IF EXISTS _trg_test_fail_postings ON public.ledger_postings;
+      CREATE TRIGGER _trg_test_fail_postings
+          BEFORE INSERT ON public.ledger_postings
+          FOR EACH ROW EXECUTE FUNCTION public._test_fail_postings_trigger();
+
+      CREATE OR REPLACE FUNCTION public._test_fail_tx_trigger()
+      RETURNS TRIGGER AS $$
+      BEGIN
+          IF NEW.amount_paise = ${amt2} AND NEW.status = 'posted' THEN
+              RAISE EXCEPTION 'TEST_INJECTED_FAILURE_AFTER_POSTINGS' USING ERRCODE = 'P0001';
+          END IF;
+          RETURN NEW;
+      END;
+      $$ LANGUAGE plpgsql;
+
+      DROP TRIGGER IF EXISTS _trg_test_fail_tx ON public.transactions;
+      CREATE TRIGGER _trg_test_fail_tx
+          BEFORE UPDATE ON public.transactions
+          FOR EACH ROW EXECUTE FUNCTION public._test_fail_tx_trigger();
+
+      CREATE OR REPLACE FUNCTION public._test_fail_audit_trigger()
+      RETURNS TRIGGER AS $$
+      BEGIN
+          IF (NEW.metadata->>'amount_paise')::bigint = ${amt3} THEN
+              RAISE EXCEPTION 'TEST_INJECTED_FAILURE_DURING_AUDIT_LOG' USING ERRCODE = 'P0001';
+          END IF;
+          RETURN NEW;
+      END;
+      $$ LANGUAGE plpgsql;
+
+      DROP TRIGGER IF EXISTS _trg_test_fail_audit ON public.audit_logs;
+      CREATE TRIGGER _trg_test_fail_audit
+          BEFORE INSERT ON public.audit_logs
+          FOR EACH ROW EXECUTE FUNCTION public._test_fail_audit_trigger();
+    `);
+
+    try {
+      const injectionPoints = [
+        { amount: amt1, label: 'During ledger posting insertion', expectedErr: /TEST_INJECTED_FAILURE_DURING_POSTING/ },
+        { amount: amt2, label: 'After postings inserted but before commit', expectedErr: /TEST_INJECTED_FAILURE_AFTER_POSTINGS/ },
+        { amount: amt3, label: 'During later database operation in same transaction', expectedErr: /TEST_INJECTED_FAILURE_DURING_AUDIT_LOG/ },
+      ];
+
+      for (const pt of injectionPoints) {
+        const preBalA = (await adminClient.query('SELECT current_balance FROM public.accounts WHERE id = $1', [accountA])).rows[0].current_balance;
+        const preBalB = (await adminClient.query('SELECT current_balance FROM public.accounts WHERE id = $1', [accountB])).rows[0].current_balance;
+
+        const failKey = `fail_inj_${pt.amount}_${Date.now()}`;
+
+        await assert.rejects(
+          async () => {
+            await processTransactionRequest({
+              userId: customerA.id,
+              role: 'customer',
+              idempotencyKey: failKey,
+              method: 'POST',
+              path: '/api/transactions',
+              body: {
+                type: 'transfer',
+                amountPaise: pt.amount,
+                sourceAccountId: accountA,
+                destinationAccountId: accountB,
+              },
+            });
+          },
+          pt.expectedErr,
+          `Injected failure at '${pt.label}' must abort transaction`
+        );
+
+        // 1. No partial ledger postings remain
+        const postCheck = await adminClient.query('SELECT count(*) FROM public.ledger_postings WHERE amount_paise = $1', [pt.amount]);
+        assert.equal(parseInt(postCheck.rows[0].count, 10), 0, 'No partial ledger postings must remain');
+
+        // 2. No transaction marked posted
+        const txCheck = await adminClient.query("SELECT count(*) FROM public.transactions WHERE amount_paise = $1 AND status = 'posted'", [pt.amount]);
+        assert.equal(parseInt(txCheck.rows[0].count, 10), 0, 'No transaction must be marked posted');
+
+        // 3. Cached balances remain unchanged
+        const postBalA = (await adminClient.query('SELECT current_balance FROM public.accounts WHERE id = $1', [accountA])).rows[0].current_balance;
+        const postBalB = (await adminClient.query('SELECT current_balance FROM public.accounts WHERE id = $1', [accountB])).rows[0].current_balance;
+        assert.equal(postBalA, preBalA, 'Account A balance must remain strictly unchanged');
+        assert.equal(postBalB, preBalB, 'Account B balance must remain strictly unchanged');
+
+        // 4. Idempotency key does not point to failed transaction
+        const idempCheck = await adminClient.query('SELECT * FROM public.idempotency_keys WHERE idempotency_key = $1', [failKey]);
+        assert.equal(idempCheck.rowCount, 0, 'Failed transaction must not leave resolved idempotency key');
+
+        // 5. Legitimate retry with normal valid amount succeeds
+        const retrySuccess = await processTransactionRequest({
+          userId: customerA.id,
+          role: 'customer',
+          idempotencyKey: failKey,
+          method: 'POST',
+          path: '/api/transactions',
+          body: {
+            type: 'transfer',
+            amountPaise: 5000,
+            sourceAccountId: accountA,
+            destinationAccountId: accountB,
+          },
+        });
+        assert.equal(retrySuccess.statusCode, 200, 'Legitimate retry after injected failure must succeed');
+        assert.equal(retrySuccess.body.status, 'success');
+      }
+    } finally {
+      // Guaranteed cleanup of temporary test triggers
+      await adminClient.query(`
+        DROP TRIGGER IF EXISTS _trg_test_fail_postings ON public.ledger_postings;
+        DROP TRIGGER IF EXISTS _trg_test_fail_tx ON public.transactions;
+        DROP TRIGGER IF EXISTS _trg_test_fail_audit ON public.audit_logs;
+        DROP FUNCTION IF EXISTS public._test_fail_postings_trigger();
+        DROP FUNCTION IF EXISTS public._test_fail_tx_trigger();
+        DROP FUNCTION IF EXISTS public._test_fail_audit_trigger();
+      `);
+    }
+  });
+
+  // ---------------------------------------------------------------------------
+  // 54. Monetary Precision & Boundary Enforcement Matrix
+  // ---------------------------------------------------------------------------
+  it('54. Monetary Precision & Boundary Enforcement Matrix', async () => {
+    // 1. Zero amount rejection
+    assert.throws(() => validateAmountPaise(0), /must be a positive integer greater than zero/);
+    assert.throws(() => validateAmountPaise('0'), /must be positive integer digits/);
+
+    // 2. Negative amount rejection
+    assert.throws(() => validateAmountPaise(-100), /must be a positive integer greater than zero/);
+    assert.throws(() => validateAmountPaise('-100'), /must be positive integer digits/);
+
+    // 3. Decimal and fractional amounts rejection
+    assert.throws(() => validateAmountPaise(12.345), /unsafe integer value exceeding JavaScript safe integer precision/);
+    assert.throws(() => validateAmountPaise('12.345'), /must be positive integer digits/);
+
+    // 4. Valid amounts: ₹0.01 (1 paise) and ₹123.45 (12345 paise)
+    assert.equal(validateAmountPaise(1), '1');
+    assert.equal(validateAmountPaise('1'), '1');
+    assert.equal(validateAmountPaise(12345), '12345');
+    assert.equal(validateAmountPaise('12345'), '12345');
+
+    // 5. Large value near BIGINT limit: MAX_BIGINT = 9223372036854775807
+    assert.equal(validateAmountPaise('9223372036854775807'), '9223372036854775807');
+
+    // 6. Exceeding BIGINT limit
+    assert.throws(() => validateAmountPaise('9223372036854775808'), /exceeds maximum PostgreSQL BIGINT capacity/);
+
+    // 7. Exponential notation, non-numeric strings, NaN, Infinity
+    assert.throws(() => validateAmountPaise('1e5'), /must be positive integer digits/);
+    assert.throws(() => validateAmountPaise('abc'), /must be positive integer digits/);
+    assert.throws(() => validateAmountPaise(''), /must be positive integer digits/);
+    assert.throws(() => validateAmountPaise(NaN), /unsafe integer value/);
+    assert.throws(() => validateAmountPaise(Infinity), /unsafe integer value/);
+    assert.throws(() => validateAmountPaise(-Infinity), /unsafe integer value/);
+
+    // 8. Precision-losing JavaScript floating-point rejection (> MAX_SAFE_INTEGER as Number)
+    const unsafeFloat = Number.MAX_SAFE_INTEGER + 2; // 9007199254740993
+    assert.throws(() => validateAmountPaise(unsafeFloat), /unsafe integer value exceeding JavaScript safe integer precision/);
+
+    // 9. Safe integer string representation (> MAX_SAFE_INTEGER as String)
+    assert.equal(validateAmountPaise('9007199254740993'), '9007199254740993');
+  });
+
+  // ---------------------------------------------------------------------------
+  // 55. Independent Database Reconciliation: 9 Consistency Invariants
+  // ---------------------------------------------------------------------------
+  it('55. Independent Database Reconciliation: 9 Financial Consistency Invariants', async () => {
+    // 1. Every posted transaction has exactly two ledger postings
+    const check1 = await adminClient.query(`
+      SELECT t.id, count(p.id) as posting_count
+      FROM public.transactions t
+      LEFT JOIN public.ledger_postings p ON p.transaction_id = t.id
+      WHERE t.status = 'posted'
+      GROUP BY t.id
+      HAVING count(p.id) != 2;
+    `);
+    assert.equal(check1.rowCount, 0, 'Invariant 1: Every posted transaction must have exactly 2 postings');
+
+    // 2. Every posted transaction postings sum to zero
+    const check2 = await adminClient.query(`
+      SELECT t.id, sum(p.signed_amount_paise) as balance_sum
+      FROM public.transactions t
+      JOIN public.ledger_postings p ON p.transaction_id = t.id
+      WHERE t.status = 'posted'
+      GROUP BY t.id
+      HAVING sum(p.signed_amount_paise) != 0;
+    `);
+    assert.equal(check2.rowCount, 0, 'Invariant 2: Every posted transaction postings must sum to zero');
+
+    // 3. No refused transaction has ledger postings
+    const check3 = await adminClient.query(`
+      SELECT t.id, count(p.id) as posting_count
+      FROM public.transactions t
+      JOIN public.ledger_postings p ON p.transaction_id = t.id
+      WHERE t.status = 'refused'
+      GROUP BY t.id;
+    `);
+    assert.equal(check3.rowCount, 0, 'Invariant 3: No refused transaction has ledger postings');
+
+    // 4. No pending transaction is left with partial postings
+    const check4 = await adminClient.query(`
+      SELECT t.id, count(p.id) as posting_count
+      FROM public.transactions t
+      JOIN public.ledger_postings p ON p.transaction_id = t.id
+      WHERE t.status = 'pending'
+      GROUP BY t.id;
+    `);
+    assert.equal(check4.rowCount, 0, 'Invariant 4: No pending transaction is left with partial postings');
+
+    // 5. No ledger posting references a nonexistent transaction or account
+    const check5 = await adminClient.query(`
+      SELECT p.id, p.transaction_id, p.account_id
+      FROM public.ledger_postings p
+      LEFT JOIN public.transactions t ON t.id = p.transaction_id
+      LEFT JOIN public.accounts a ON a.id = p.account_id
+      WHERE t.id IS NULL OR a.id IS NULL;
+    `);
+    assert.equal(check5.rowCount, 0, 'Invariant 5: No ledger posting references nonexistent transaction or account');
+
+    // 6. No posted transaction has been mutated in a way that breaks its original financial record
+    const check6 = await adminClient.query(`
+      SELECT t.id, t.amount_paise, abs(p.signed_amount_paise) as posting_amount
+      FROM public.transactions t
+      JOIN public.ledger_postings p ON p.transaction_id = t.id
+      WHERE t.status = 'posted' AND t.amount_paise != abs(p.signed_amount_paise);
+    `);
+    assert.equal(check6.rowCount, 0, 'Invariant 6: No posted transaction has mutated');
+
+    // 7. Cached account balances match the sum of their ledger postings
+    const check7 = await adminClient.query(`
+      SELECT a.id, a.account_number, a.current_balance, COALESCE(sum(p.signed_amount_paise), 0) as postings_sum
+      FROM public.accounts a
+      LEFT JOIN public.ledger_postings p ON p.account_id = a.id
+      GROUP BY a.id, a.account_number, a.current_balance
+      HAVING a.current_balance != COALESCE(sum(p.signed_amount_paise), 0);
+    `);
+    assert.equal(check7.rowCount, 0, 'Invariant 7: Cached account balances match sum of postings');
+
+    // 8. Reversal records do not create duplicate reversals
+    const check8 = await adminClient.query(`
+      SELECT original_transaction_id, count(*) as reversal_count
+      FROM public.transactions
+      WHERE type = 'reversal' AND status = 'posted'
+      GROUP BY original_transaction_id
+      HAVING count(*) > 1;
+    `);
+    assert.equal(check8.rowCount, 0, 'Invariant 8: Reversal records do not create duplicate reversals');
+
+    // 9. Idempotency mappings do not point to missing or inconsistent transactions
+    const check9 = await adminClient.query(`
+      SELECT k.idempotency_key, k.transaction_id, t.id as tx_id, t.status
+      FROM public.idempotency_keys k
+      LEFT JOIN public.transactions t ON t.id = k.transaction_id
+      WHERE (k.status = 'resolved' AND (k.transaction_id IS NULL OR t.id IS NULL))
+         OR (k.transaction_id IS NOT NULL AND t.id IS NULL);
+    `);
+    assert.equal(check9.rowCount, 0, 'Invariant 9: Idempotency mappings do not point to missing or inconsistent transactions');
   });
 });

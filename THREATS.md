@@ -94,6 +94,11 @@ The architectural baseline enforces:
    - The helper function inspects `v_role := ledger_secure.current_verified_user_role()`. When `v_role = 'admin'`, it executes `IF v_role = 'admin' THEN RETURN TRUE; END IF;` immediately, bypassing the membership table lookup.
    - Consequently, administrators evaluate to `TRUE` for 100% of rows across all accounts, transactions, ledger postings, and memberships, maintaining full administrative visibility.
    - The admin role cannot be forged by untrusted callers: `current_verified_user_role()` reads strictly from `active_session_contexts`, which is populated only after verifying the HMAC signature and confirming that the authoritative record in `public.users` has `role = 'admin'`. Asserting `role = 'admin'` for customer or auditor accounts fails with SQL error `28000`.
+10. **High-Concurrency Idempotency, Reversal Isolation & Atomic Rollback**:
+    - Under high-concurrency races (10+ simultaneous identical requests), PostgreSQL unique constraints on `(user_id, idempotency_key)` serialize reservation; exactly one transaction posts while 9 concurrent calls return verified idempotent replays without duplicate debits or credits.
+    - Concurrent requests on the same key with conflicting payloads deterministically reject the loser with HTTP 409 conflict.
+    - Dual administrator concurrent reversals on the same transaction are serialized under row-level account and transaction locks (`FOR UPDATE`); exactly one reversal posts while the second is refused with `ALREADY_REVERSED` (HTTP 422), preventing double reversal.
+    - Test-injected failures at any execution boundary (during posting insertion, after postings before commit, during audit logging) abort the PostgreSQL transaction and trigger atomic rollback, leaving zero partial postings, zero posted transactions, unchanged balances, and zero stale in-progress idempotency keys, allowing legitimate retries to succeed.
 
 ---
 

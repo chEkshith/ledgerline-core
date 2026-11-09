@@ -156,3 +156,19 @@ This document records the genuine prompt history and development requests execut
      - Auditor session is strictly isolated to explicitly granted memberships.
      - Tampering attempts by customer/auditor asserting `admin` role are rejected with `28000` (invalid authorization specification).
 - **Outcome**: Confirmed no architectural defect or gap exists—`is_account_member()` explicitly short-circuits to `RETURN TRUE;` when `v_role = 'admin'`, resolving the policy globally without recursion. Added Test 48; server tests expanded to 52/52 passing; client tests 41/41 passing (93/93 total tests passing). Development database `ledgerline_dev` preserved.
+
+---
+
+## Prompt 13: Phase 4, Task 3 — Adversarial Financial Integrity, Idempotency, Concurrency and Failure Testing
+- **Date**: 2026-11-09
+- **Request Summary**:
+  1. Inspect financial engine, idempotency lifecycle, and reversal procedures; establish test coverage matrix.
+  2. Implement adversarial idempotency race tests:
+     - 10 simultaneous identical requests with identical keys and payloads proving exactly one transaction posts, 9 return idempotent replays, and no duplicate debits/credits occur.
+     - Simultaneous key race with conflicting payloads proving exact owner reservation and HTTP 409 conflict rejection on the loser.
+     - Pre-commit failure rollback verification proving no stale in-progress idempotency key remains and legitimate retry succeeds.
+  3. Implement concurrent reversal race testing two administrators simultaneously reversing the same transaction with different keys, proving exactly one reversal posts, the second receives `ALREADY_REVERSED` (422), balances are restored, and retry with the winning key returns cached response.
+  4. Implement failure injection testing atomic rollback across three critical boundaries: during ledger posting insertion, after postings inserted but before commit, and during audit log insertion, verifying zero financial residue and successful retry.
+  5. Implement monetary precision and boundary tests verifying rejection of zeros, negatives, decimals, exponential notation, non-numeric strings, NaN, Infinity, and unsafe JS floats (`> MAX_SAFE_INTEGER`), while accepting valid minor currency and large BIGINT strings.
+  6. Execute independent database reconciliation verifying all 9 financial consistency invariants return zero violations.
+- **Outcome**: Added Tests 49 through 55 in `server/test/phase2.test.js`; server test suite expanded from 52 to 59 passing tests; client test suite 41/41 passing (100/100 total tests passing); production client build clean (6.96s); development database `ledgerline_dev` preserved.
