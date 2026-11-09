@@ -11,7 +11,7 @@ Classification: Enterprise Financial Core
 **LedgerLine** is an enterprise-grade financial transaction engine and double-entry ledger designed with **defense-in-depth security** and mathematical correctness. Rather than delegating financial validation solely to application-tier controllers, LedgerLine enforces financial invariants, zero-sum constraints, and authorization policies directly within PostgreSQL database triggers and Row-Level Security (RLS).
 
 ### Core Tenets:
-1. **Mathematical Invariance**: Floating-point numbers are prohibited across all tiers. Minor currency units (**integer paise**, `BIGINT`) prevent precision loss.
+1. **Mathematical Invariance**: Binary floating-point numbers are avoided across all monetary tiers. Minor currency units (**integer paise**, `BIGINT`) prevent IEEE 754 precision loss in balance arithmetic (without claiming to eliminate all potential financial calculation defects).
 2. **Double-Entry Rigor**: Every posted transaction yields exactly two complementary postings that sum strictly to zero ($\sum \Delta = 0$). Refused transactions yield zero postings.
 3. **Database-Enforced Access Control**: PostgreSQL `FORCE ROW LEVEL SECURITY` on all 7 domain tables guarantees that multi-tenant isolation cannot be bypassed even if backend application code contains logic flaws.
 4. **Independent Nonce Lifecycle**: Caller cryptographic identity assertions commit independently before financial execution begins, guaranteeing that assertion replay is impossible even if financial transactions roll back.
@@ -351,7 +351,7 @@ Standard JavaScript `Number` types use 64-bit IEEE 754 double-precision floating
 0.1 + 0.2 === 0.3; // FALSE! Evaluates to 0.30000000000000004
 10.55 * 100;       // Evaluates to 1054.9999999999998 paise (loss of 1 paisa!)
 ```
-In banking systems processing millions of transactions, cumulative floating-point drift creates un-reconcilable ledger deficits and regulatory non-compliance.
+In banking systems processing millions of transactions, cumulative floating-point rounding errors create un-reconcilable ledger deficits and regulatory non-compliance.
 
 ### 7.2 LedgerLine Minor Currency Protocol
 - **Storage & Engine**: All database columns and backend calculations use PostgreSQL `BIGINT` representing integer paise (₹1 = 100 paise).

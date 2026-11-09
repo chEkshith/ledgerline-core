@@ -2,7 +2,7 @@
 
 LedgerLine is an enterprise-grade, secure financial transaction management platform and double-entry ledger built on the **PERN** stack (PostgreSQL 16, Express, React 18, Node.js 20+ LTS).
 
-Designed for mission-critical money movement, LedgerLine enforces strict ACID transactional integrity, immutable double-entry bookkeeping, Row-Level Security, zero floating-point arithmetic (integer paise), defensive cryptographic session contexts, and transactional idempotency.
+Designed for mission-critical money movement, LedgerLine enforces strict ACID transactional integrity, immutable double-entry bookkeeping, Row-Level Security, integer paise arithmetic (avoiding binary floating-point rounding errors in core monetary calculations), defensive cryptographic session contexts, and transactional idempotency.
 
 ---
 
@@ -66,10 +66,10 @@ ledgerline-core/
 
 ## Core Financial & Security Principles
 
-1. **Integer Paise Arithmetic (Zero Floating-Point Drift)**:
-   - Floating-point representations (IEEE 754) suffer from precision rounding errors (`0.1 + 0.2 !== 0.3` and `10.55 * 100 === 1054.9999999999998`).
-   - All financial amounts are strictly processed and stored as **integer paise** (`BIGINT`, where ₹1.00 = 100 paise).
-   - On the frontend, `rupeesToPaise` uses string splitting and BigInt arithmetic to eliminate float contamination before transmission.
+1. **Integer Paise Arithmetic (Avoiding Binary Floating-Point Drift)**:
+   - Binary floating-point representations (IEEE 754) suffer from precision rounding errors (`0.1 + 0.2 !== 0.3` and `10.55 * 100 === 1054.9999999999998`).
+   - All financial amounts are strictly processed and stored as **integer paise** (`BIGINT`, where ₹1.00 = 100 paise), avoiding binary floating-point arithmetic in core monetary calculations (without promising that this eliminates every possible financial calculation defect).
+   - On the frontend, `rupeesToPaise` uses string splitting and BigInt arithmetic to avoid float contamination before transmission.
    - The backend validates amounts within PostgreSQL `BIGINT` range, rejecting negatives, fractions, floats, and unsafe JavaScript integers.
 2. **Double-Entry Zero-Sum Ledger**:
    - Every posted transaction produces exactly two balanced postings: one debit and one credit of equal magnitude ($\text{debit} + \text{credit} = 0$).

@@ -11,7 +11,7 @@ Classification: Enterprise Financial Security
 LedgerLine processes and records multi-tenant financial movements with strict mathematical consistency, non-repudiation, and defense-in-depth isolation.
 
 The security architecture enforces:
-- **Zero Floating-Point Drift**: Integer minor currency units (`BIGINT` paise).
+- **Minor-Currency Arithmetic**: Integer minor currency units (`BIGINT` paise) avoiding binary floating-point rounding in core money math.
 - **Layered Defense**: Route Validation $\to$ Controller Checks $\to$ Service HMAC Assertions $\to$ PostgreSQL `FORCE RLS` $\to$ Database Triggers & Constraints.
 - **Principle of Least Privilege**: Explicit separation between `ledgerline_owner` (`NOLOGIN`, `NOSUPERUSER`, `NOBYPASSRLS`) and `ledgerline_app` (read-mostly runtime role).
 - **Non-Replayable Session Contexts**: HMAC-SHA256 assertions with 30s lifetime and single-use nonces consumed in independently committed transactions.
@@ -24,7 +24,7 @@ The security architecture enforces:
 | Threat Category | Potential Risk in LedgerLine | Implemented Mitigation Strategy | Primary Enforcement Tier |
 | :--- | :--- | :--- | :--- |
 | **Spoofing** | Impersonation of legitimate users or forging database session identity. | Cryptographic HMAC assertions with 30s expiry and single-use nonce; verified database session context bound to `(pg_backend_pid(), txid_current())`; scrypt password hashing; admin action attribution verifying authoritative database role in real time. | Database & Backend |
-| **Tampering** | Modifying transaction amounts, mutating historical postings, altering account balances. | Double-entry zero-sum ledgering ($\sum \Delta = 0$); integer paise arithmetic (`BIGINT`); append-only triggers on `ledger_postings` and `audit_logs`; `trg_protect_finalized_transactions` preventing update/deletion of posted/refused transactions; deferred balance reconciliation at commit; frontend string-based BigInt parsing preventing floating-point rounding. | Database Triggers |
+| **Tampering** | Modifying transaction amounts, mutating historical postings, altering account balances. | Double-entry zero-sum ledgering ($\sum \Delta = 0$); integer paise arithmetic (`BIGINT`); append-only triggers on `ledger_postings` and `audit_logs`; `trg_protect_finalized_transactions` preventing update/deletion of posted/refused transactions; deferred balance reconciliation at commit; frontend string-based BigInt parsing avoiding binary floating-point rounding. | Database Triggers |
 | **Repudiation** | An actor denies executing a financial transaction or administrative action. | Immutable audit log trail with verified actor ID, authoritative role, timestamp, and metadata; cryptographic request payload hashing with deterministic JSON canonicalization. | Database & Triggers |
 | **Information Disclosure** | Leakage of balances, transaction history, credentials, or PII. | PostgreSQL `FORCE ROW LEVEL SECURITY` across all 7 domain tables; non-recursive RLS helpers; posting RLS strictly preventing cross-account leakage; sanitized error handler masking internal errors; automatic token clearance on session expiry. | Database (RLS) |
 | **Denial of Service (DoS)** | Deadlocks on concurrent transfers, replay storms, connection pool exhaustion. | Deterministic ascending UUID account locking; request idempotency reservation with cached replay; 3s database lock timeout; advisory locking on migrations (`pg_advisory_lock`); connection discard (`client.release(true)`) preventing pool contamination on unconfirmed cleanup; 10 KB request body limit. | Database & Express |
@@ -34,8 +34,8 @@ The security architecture enforces:
 
 ## 3. Financial Integrity Invariants
 
-1. **Integer Paise Arithmetic (Zero Floating-Point Operations)**:
-   - All financial amounts are represented and calculated in minor currency units (**integer paise**, `BIGINT`, where ₹1.00 = 100 paise).
+1. **Integer Paise Arithmetic (Avoiding Binary Floating-Point Math)**:
+   - All financial amounts are represented and calculated in minor currency units (**integer paise**, `BIGINT`, where ₹1.00 = 100 paise), avoiding IEEE 754 binary floating-point rounding in core money movement calculations (without claiming this alone eliminates every potential financial calculation defect).
    - Frontend parses decimal inputs using string splitting and native `BigInt` math (`rupeesToPaise`), never passing floats over the wire.
    - Backend validates integers within PostgreSQL `BIGINT` range, rejecting negatives, floats, fractions, and unsafe JavaScript integers.
 2. **Double-Entry Invariant**:
@@ -276,6 +276,6 @@ The security architecture enforces:
 | **Total Automated Tests** | 103 Passed (0 Failed) | 62 Server Tests + 41 Client Tests |
 | **Domain Tables Protected by `FORCE RLS`** | 7 of 7 tables (100%) | `verify_install.js` catalog audit |
 | **`SECURITY DEFINER` Functions Hardened** | 26 of 26 functions (100%) | `verify_install.js` catalog audit |
-| **Floating-Point Operations in Money Math** | 0 (Zero) | `rupeesToPaise` string-based `BigInt` parsing |
+| **Floating-Point Operations in Core Money Math** | Avoided (Integer Paise) | `rupeesToPaise` string-based `BigInt` parsing and DB `BIGINT` |
 | **Financial Consistency Invariants Verified** | 9 of 9 (100%) | Test 55 & Test 58 Database Reconciliation |
 | **Committed In-Progress Idempotency Records** | 0 (Zero) | Test 58 live database assertion |

@@ -11,14 +11,14 @@ Data Context: Safe Local Demonstration Data (Zero Production Credentials)
 
 ### 1. Problem Statement
 Traditional financial web applications routinely place double-spending defenses, ledger balance math, and authorization logic exclusively in high-level application code (Node.js, Python, Java). This pattern is vulnerable to:
-1. **IEEE 754 Floating-Point Drift**: Decimal rounding errors (`0.1 + 0.2 !== 0.3`) silently corrupt balances.
+1. **IEEE 754 Floating-Point Rounding Inaccuracies**: Binary fraction rounding errors (`0.1 + 0.2 !== 0.3`) silently corrupt ledger arithmetic.
 2. **Race Conditions & Double Spending**: Parallel requests exploit dirty reads or lock interleaving to withdraw funds beyond available limits.
 3. **Application Layer Bypass**: A compromised web process or flawed SQL query can leak multi-tenant accounts or mutate immutable transaction ledgers.
 4. **Un-reconciled Rollback Residue**: Partial failures leave orphan postings or inconsistent cached balances.
 
 ### 2. Solution Architecture
 **LedgerLine** is a hardened, double-entry financial transaction core built on the principle of **defense-in-depth database enforcement**:
-- **Integer Minor Currency**: All monetary amounts are handled strictly as integer paise (`BIGINT`, ₹1 = 100 paise), guaranteeing zero rounding loss from UI to disk.
+- **Integer Minor Currency**: All monetary amounts are handled strictly as integer paise (`BIGINT`, ₹1 = 100 paise), avoiding binary floating-point rounding from UI to disk (without claiming to eliminate all potential financial calculation defects).
 - **Cryptographic Assertion Lifecycle**: Identity assertions are signed with HMAC-SHA256 and committed independently before financial processing begins, surviving rollbacks.
 - **PostgreSQL Row-Level Security (`FORCE RLS`)**: Non-recursive security functions isolate tenant accounts and postings at the engine level.
 - **Transactional Idempotency**: Atomic reservation, deterministic JSON canonical payload hashing, and cached replays eliminate duplicate debits under concurrent storms.

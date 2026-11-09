@@ -9,7 +9,7 @@ Date: 2026-11-09
 
 ## 1. Project Overview & Deliverable Summary
 
-LedgerLine is a multi-tenant double-entry financial transaction engine designed with layered defense-in-depth security, strict minor-currency arithmetic (zero floating-point drift), non-recursive PostgreSQL Row-Level Security (`FORCE RLS`), three-stage assertion lifecycle surviving transaction rollback, and deterministic concurrency control.
+LedgerLine is a multi-tenant double-entry financial transaction engine designed with layered defense-in-depth security, strict minor-currency arithmetic in integer paise (avoiding binary floating-point arithmetic in core calculations), non-recursive PostgreSQL Row-Level Security (`FORCE RLS`), three-stage assertion lifecycle surviving transaction rollback, and deterministic concurrency control.
 
 ### Submission Links & Endpoints:
 - **Repository URL**: `https://github.com/chEkshith/ledgerline-core.git` *(Verified via `git remote -v`)*
@@ -25,7 +25,7 @@ LedgerLine is a multi-tenant double-entry financial transaction engine designed 
 
 | Requirement Area | Status | Evidence / Document Reference |
 | :--- | :---: | :--- |
-| **Zero Floating-Point Drift** | **COMPLIANT** | All monetary amounts stored and computed in integer paise (`BIGINT`). Verified in `client/src/utils/money.js` and Test 54. |
+| **Minor-Currency Arithmetic** | **COMPLIANT** | All monetary amounts stored and computed in integer paise (`BIGINT`), avoiding binary floating-point arithmetic in core monetary calculations. Verified in `client/src/utils/money.js` and Test 54. |
 | **Double-Entry Balance** | **COMPLIANT** | Every posted transaction creates exactly 2 balanced postings ($\sum \text{postings} = 0$). Refused transactions create 0 postings. |
 | **Append-Only Immutability** | **COMPLIANT** | Triggers `trg_protect_finalized_transactions` and `trg_append_only_postings` block `UPDATE` and `DELETE` on posted transactions and ledger postings. Verified in Test 19 and Test 56. |
 | **PostgreSQL Row-Level Security** | **COMPLIANT** | All 7 domain tables have `ROW LEVEL SECURITY` and `FORCE ROW LEVEL SECURITY` enabled. Verified in Tests 36, 37, 38, and `verify_install.js`. |
@@ -47,7 +47,7 @@ LedgerLine is a multi-tenant double-entry financial transaction engine designed 
 3. **`docs/DEPLOYMENT.md`**: Production deployment guide, managed PostgreSQL requirements, connection pooling, SSL enforcement, secrets generation, and backup/recovery runbooks.
 4. **`docs/DEMO.md`**: 5-minute timestamped demo runbook with safe local demo data and comprehensive project write-up.
 5. **`THREATS.md`**: Complete STRIDE matrix and exhaustive analysis of all 17 specific adversarial threat scenarios with test mappings.
-6. **`PROMPTS.md`**: Full genuine prompt history log from Prompt 1 through Prompt 16.
+6. **`PROMPTS.md`**: Full genuine prompt history log from Prompt 1 through Prompt 17.
 7. **`.github/workflows/ci.yml`**: Continuous Integration workflow configuration.
 8. **`README.md`**: Comprehensive project guide, architecture overview, quick start, and security summary.
 
@@ -61,5 +61,5 @@ LedgerLine is a multi-tenant double-entry financial transaction engine designed 
 - [x] Fresh database installation verified on disposable PostgreSQL instance (`ledgerline_migration_check`).
 - [x] Zero hardcoded secrets or passwords committed to version control.
 - [x] Development database `ledgerline_dev` preserved untouched (274 transactions, 36 accounts, 67 users, 406 postings verified via superuser catalog scan; unauthenticated queries strictly filtered by FORCE RLS).
-- [x] Git commits preserved (`5d80f1a`, `32b8bee`, `6e82ea6`, `8d6a092`, `dfe8a66`, `f7674b4`, `330a34a`, `d5de85c`, and final closure commit).
+- [x] Git commits preserved (`5d80f1a`, `32b8bee`, `6e82ea6`, `8d6a092`, `dfe8a66`, `f7674b4`, `330a34a`, `d5de85c`, `e2403d3`, and CI test discovery commit).
 - [ ] Live Cloud Deployment: `NOT DEPLOYED / LOCAL DEMO ONLY` (Deployment guides and production runbooks documented in `docs/DEPLOYMENT.md`).
