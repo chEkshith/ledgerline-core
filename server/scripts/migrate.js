@@ -39,9 +39,10 @@ async function runMigrations() {
         `CRITICAL TEST ISOLATION FAILURE: Connected database is '${connectedDb}', but test migrations are restricted to 'ledgerline_test'.`
       );
     }
-    if (env.NODE_ENV === 'test' && server_ip && server_ip !== '127.0.0.1' && server_ip !== '::1') {
+    const isAllowedTestHost = server_ip === '127.0.0.1' || server_ip === '::1' || (process.env.CI && (server_ip.startsWith('172.') || server_ip.startsWith('10.') || server_ip.startsWith('192.168.')));
+    if (env.NODE_ENV === 'test' && server_ip && !isAllowedTestHost) {
       throw new Error(
-        `CRITICAL TEST ISOLATION FAILURE: Connected server IP is '${server_ip}', expected local test host 127.0.0.1.`
+        `CRITICAL TEST ISOLATION FAILURE: Connected server IP is '${server_ip}', expected local test host 127.0.0.1 or CI container network.`
       );
     }
 

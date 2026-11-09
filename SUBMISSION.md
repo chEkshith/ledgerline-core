@@ -47,7 +47,7 @@ LedgerLine is a multi-tenant double-entry financial transaction engine designed 
 3. **`docs/DEPLOYMENT.md`**: Production deployment guide, managed PostgreSQL requirements, connection pooling, SSL enforcement, secrets generation, and backup/recovery runbooks.
 4. **`docs/DEMO.md`**: 5-minute timestamped demo runbook with safe local demo data and comprehensive project write-up.
 5. **`THREATS.md`**: Complete STRIDE matrix and exhaustive analysis of all 17 specific adversarial threat scenarios with test mappings.
-6. **`PROMPTS.md`**: Full genuine prompt history log from Prompt 1 through Prompt 15.
+6. **`PROMPTS.md`**: Full genuine prompt history log from Prompt 1 through Prompt 16.
 7. **`.github/workflows/ci.yml`**: Continuous Integration workflow configuration.
 8. **`README.md`**: Comprehensive project guide, architecture overview, quick start, and security summary.
 
@@ -60,6 +60,6 @@ LedgerLine is a multi-tenant double-entry financial transaction engine designed 
 - [x] Client production build verified (`npm --prefix client run build` $\to$ `dist/` generated without errors).
 - [x] Fresh database installation verified on disposable PostgreSQL instance (`ledgerline_migration_check`).
 - [x] Zero hardcoded secrets or passwords committed to version control.
-- [x] Development database `ledgerline_dev` preserved untouched (0 test mutations; isolated from test suite).
-- [x] Git commits preserved (`5d80f1a`, `32b8bee`, `6e82ea6`, `8d6a092`, `dfe8a66`, `f7674b4`, `330a34a`, and follow-up verification closure commit).
+- [x] Development database `ledgerline_dev` preserved untouched (274 transactions, 36 accounts, 67 users, 406 postings verified via superuser catalog scan; unauthenticated queries strictly filtered by FORCE RLS).
+- [x] Git commits preserved (`5d80f1a`, `32b8bee`, `6e82ea6`, `8d6a092`, `dfe8a66`, `f7674b4`, `330a34a`, `d5de85c`, and final closure commit).
 - [ ] Live Cloud Deployment: `NOT DEPLOYED / LOCAL DEMO ONLY` (Deployment guides and production runbooks documented in `docs/DEPLOYMENT.md`).

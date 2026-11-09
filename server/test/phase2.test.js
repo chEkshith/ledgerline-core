@@ -56,9 +56,10 @@ describe('LedgerLine Phase 2 Comprehensive Test Suite', () => {
         `CRITICAL TEST ISOLATION FAILURE: Connected database is '${actualDb}', but tests are only permitted to execute against 'ledgerline_test'. Refusing execution.`
       );
     }
-    if (server_ip && server_ip !== '127.0.0.1' && server_ip !== '::1') {
+    const isAllowedTestHost = server_ip === '127.0.0.1' || server_ip === '::1' || (process.env.CI && (server_ip.startsWith('172.') || server_ip.startsWith('10.') || server_ip.startsWith('192.168.')));
+    if (server_ip && !isAllowedTestHost) {
       throw new Error(
-        `CRITICAL TEST ISOLATION FAILURE: Connected server IP is '${server_ip}', expected local test host 127.0.0.1.`
+        `CRITICAL TEST ISOLATION FAILURE: Connected server IP is '${server_ip}', expected local test host 127.0.0.1 or CI container network.`
       );
     }
 
@@ -3150,9 +3151,9 @@ describe('LedgerLine Phase 2 Comprehensive Test Suite', () => {
   });
 
   // ---------------------------------------------------------------------------
-  // 57. Actual Monetary Overflow: Database BIGINT Balance Arithmetic Rollback
+  // 57. 64-bit Integer Arithmetic Boundary: Rejects BIGINT Exceedance and Rolls Back
   // ---------------------------------------------------------------------------
-  it('57. Actual Monetary Overflow: Database BIGINT Balance Arithmetic Exceedance and Atomic Rollback', async () => {
+  it('57. 64-bit Integer Arithmetic Boundary: Rejects BIGINT Exceedance During Double-Entry Posting and Rolls Back Atomically', async () => {
     const unique = Date.now();
     const ovfUser = (await registerCustomer(`ovf_user_${unique}@test.local`, 'Password123!')).user;
     const ovfAcc = (await createCustomerAccount(ovfUser.id, 'customer', `ACC-OVF-${unique}`)).accountId;
@@ -3207,7 +3208,15 @@ describe('LedgerLine Phase 2 Comprehensive Test Suite', () => {
     assert.equal(txPostings.rows[0].sum_net, '0', 'Setup postings must sum strictly to zero');
 
     // 4. Attempt a further 100-paise deposit using a fresh idempotency key
-    // 9223372036854775800 + 100 = 9223372036854775900 > MAX_BIGINT (9223372036854775807)
+    // Note on dual boundary exceedance:
+    // In this double-entry operation, the debit posting is applied first to the clearing source account:
+    //   -9,223,372,036,854,775,800 + (-100) = -9,223,372,036,854,775,900 < MIN_BIGINT (-9,223,372,036,854,775,808).
+    // The credit posting to the customer destination account would likewise exceed bounds:
+    //   +9,223,372,036,854,775,800 + (+100) = +9,223,372,036,854,775,900 > MAX_BIGINT (+9,223,372,036,854,775,807).
+    // Because PostgreSQL evaluates the debit posting first during trg_reconcile_posting_balances,
+    // the operation breaches 64-bit integer limits on the debit leg and immediately raises SQLSTATE 22003.
+    // This test proves that the financial engine and database reject 64-bit integer limit exceedances
+    // (underflow or overflow on any posting) and roll back the entire transaction atomically with zero residue.
     const overflowKey = `ovf_tx_key_${unique}`;
     await assert.rejects(
       async () => {

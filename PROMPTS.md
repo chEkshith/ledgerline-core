@@ -222,3 +222,10 @@ This document records the genuine prompt history and development requests execut
      - Remove unmeasured `~1-5ms` latency claim from `DEMO.md` (to be measured live).
   6. Reconcile remote history: confirm `origin` points to `https://github.com/chEkshith/ledgerline-core.git`, verify Phase 3 commit `5d80f1a` is an ancestor (`git merge-base --is-ancestor origin/main HEAD`), and push all verified commits without force flags.
 - **Outcome**: Test 57 rewritten to use 100% balanced financial engine flow; all 62 server tests and 41 client tests (103 total) passed cleanly; documentation reconciled; committed as `test: close final LedgerLine verification gaps`; pushed cleanly to `origin/main`.
+
+---
+
+### Prompt 16 (Phase 4 Final Database Provenance, CI and Dependency Verification)
+- **Timestamp**: 2026-11-09T13:01:18+05:30
+- **Request Summary**: Investigate `ledgerline_dev` count discrepancy (274 vs 0) using strictly read-only checks; verify Test 57 boundary assertions and clarify dual-boundary exceedance; remove unused `zod` dependency and update lockfile; verify GitHub Actions CI run status and logs; confirm test isolation guards and development database row counts; create single follow-up commit `chore: finalize LedgerLine verification` and push normally without force flags.
+- **Outcome**: Read-only investigation proved `ledgerline_dev` was never modified: superuser `postgres` queries see all 274 transactions, 36 accounts, 67 users, 406 postings, while unauthenticated `ledgerline_app` queries are filtered by PostgreSQL Row-Level Security (`FORCE RLS`) to 0/1/0/0. Removed unused `zod` direct dependency (0 production vulnerabilities remaining). Clarified Test 57 double-entry debit underflow / credit overflow boundary mechanics. Updated test isolation host guard to allow Docker container network in CI while strictly requiring `ledgerline_test` database. All 103 tests passing; production client build clean; committed as `chore: finalize LedgerLine verification`; pushed to `origin/main`.

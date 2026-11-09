@@ -199,10 +199,10 @@ The security architecture enforces:
   - **Database-Enforced**:
     - Table constraint `CHECK (amount_paise > 0)`.
     - PostgreSQL `BIGINT` arithmetic: Exceeding `9223372036854775807` raises SQLSTATE `22003` (`bigint out of range`), triggering complete atomic transaction rollback with zero postings.
-  - **Backend-Enforced**: Zod validator enforces `/^\d+$/` digit string validation.
+  - **Backend-Enforced**: Explicit regex `/^\d+$/` and `validateAmountPaise` strictly validate integer paise strings without floats, negatives, exponents, or non-digits.
   - **Frontend-Enforced**: `rupeesToPaise` uses string splitting and native `BigInt` parsing, prohibiting floating-point math.
-- **Verification Test**: Test 26 (`Input validation`), Test 54 (`Monetary Precision & Boundary Enforcement Matrix`), and Test 57 (`Actual Monetary Overflow: Database BIGINT Balance Arithmetic Exceedance and Atomic Rollback`).
-- **Residual Risk**: Overflow triggers database exception rather than silent wrapping; residual risk exists if input exceeds string length limits before validation.
+- **Verification Test**: Test 26 (`Input validation`), Test 54 (`Monetary Precision & Boundary Enforcement Matrix`), and Test 57 (`64-bit Integer Arithmetic Boundary: Rejects BIGINT Exceedance During Double-Entry Posting and Rolls Back Atomically`).
+- **Residual Risk**: Exceeding 64-bit integer limits triggers SQLSTATE `22003` and complete transaction rollback. In double-entry posting, the debit leg underflows before credit execution; both accounts remain unmutated with zero partial postings. Residual risk exists if input exceeds string length limits before validation.
 
 ---
 
