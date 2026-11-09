@@ -166,7 +166,7 @@ All migrations are located in `database/migrations/` and must be applied in asce
 6. `006_financial_engine_procedures.sql`: Implements `deposit`, `withdrawal`, `transfer`, and `reversal` `SECURITY DEFINER` procedures.
 7. `007_audit_logging.sql`: Installs append-only audit log triggers and attribution procedures.
 8. `008_security_remediations.sql`: Hardens `trg_protect_finalized_transactions`, removes hardcoded credentials, and adjusts table grants.
-9. `009_harden_search_paths_and_schema_privileges.sql`: Revokes `TEMPORARY` on database from `PUBLIC`, hardens search paths across all 26 `SECURITY DEFINER` functions to `pg_catalog, ledger_secure, public, pg_temp`.
+9. `009_harden_search_paths_and_schema_privileges.sql`: Revokes `TEMPORARY` on database from `PUBLIC`, hardens search paths across all 26 `SECURITY DEFINER` functions to explicitly qualify system catalogs (`pg_catalog` first) and place `pg_temp` last (16 functions use `pg_catalog, ledger_secure, public, pg_temp`; 4 use `pg_catalog, public, pg_temp`; 3 use `pg_catalog, ledger_secure, pg_temp`; 3 pure validation triggers use `pg_catalog, pg_temp`).
 
 ### Verification Command:
 ```bash
@@ -176,7 +176,31 @@ Confirms that all 7 tables have `relforcerowsecurity = true` and all 26 `SECURIT
 
 ---
 
-## 7. Health Checks, Monitoring & Alerting
+## 7. Operational Security Architecture & Controls
+
+### 7.1 Reverse-Proxy Rate Limiting Requirement
+> [!IMPORTANT]
+> **Rate Limiting Architecture**:
+> In-application rate limiting is intentionally not implemented in the Express Node.js layer to avoid single-process memory bottlenecks under volumetric floods.
+> Production deployments MUST enforce rate limiting at the ingress/reverse-proxy layer (e.g. Nginx `limit_req_zone`, Cloudflare Rate Limiting Rules, or AWS WAF):
+> - **Public Auth Endpoints** (`POST /api/auth/login`, `POST /api/auth/register`): Bounded to 5-10 requests/minute per IP.
+> - **Financial Transaction Endpoints** (`POST /api/transactions/*`): Bounded to 30 requests/minute per authenticated user.
+> - **General Read Endpoints** (`GET /api/*`): Bounded to 120 requests/minute per IP/token.
+
+### 7.2 Browser Token Storage Model & Residual XSS Risk
+> [!WARNING]
+> **SessionStorage vs. HttpOnly Cookie Security Trade-Off**:
+> LedgerLine stores JWT authentication tokens in browser `sessionStorage` (with in-memory fallback), strictly rejecting persistent `localStorage`.
+> - **Security Benefit**: Isolates authentication state to the single browser tab/session; closing the tab immediately purges credentials and prevents cross-tab session leakage.
+> - **Residual Risk**: Unlike `HttpOnly` cookies, `sessionStorage` is accessible to JavaScript executing in the same origin. If a Cross-Site Scripting (XSS) vulnerability were introduced into client-rendered content, a malicious script could read `sessionStorage.getItem('ledgerline_auth')`.
+> - **Production Recommendation**: High-assurance financial production deployments should migrate token transmission to `HttpOnly; SameSite=Strict; Secure` session cookies paired with anti-CSRF tokens.
+
+### 7.3 CI/CD Automation Status
+A GitHub Actions workflow is authored at `.github/workflows/ci.yml`. It spins up a PostgreSQL 16 container, applies migrations 001–009, runs the full test suite (62 server + 41 client = 103 total tests), and compiles the Vite client bundle. Remote GitHub execution has not yet run because the repository commits are preserved locally pending placement approval before push.
+
+---
+
+## 8. Health Checks, Monitoring & Alerting
 
 - **Liveness Probe**: `GET /api/health`
   - Expected: HTTP 200 with `status: "ok"`, `database: "connected"`

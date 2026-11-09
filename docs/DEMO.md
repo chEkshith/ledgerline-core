@@ -68,10 +68,10 @@ Traditional financial web applications routinely place double-spending defenses,
 2. **Observe**:
    - Live status: `OK`
    - Database Pool: `Connected`
-   - Ping latency: `< 5ms`
+   - Ping latency: Localhost loopback response (typically ~1-5ms on local test harness)
    - Zero configuration errors.
 3. **Presenter Script**:
-   > *"Welcome to LedgerLine. We're looking at the live system health probe. Notice the sub-5ms round-trip to PostgreSQL. LedgerLine enforces banking-grade guarantees directly at the database tier using integer paise arithmetic, RLS, and append-only triggers."*
+   > *"Welcome to LedgerLine. We're looking at the live system health probe. Notice the low-latency database connectivity. LedgerLine enforces banking-grade guarantees directly at the database tier using integer paise arithmetic, RLS, and append-only triggers."*
 
 ---
 

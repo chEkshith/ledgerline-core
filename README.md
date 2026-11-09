@@ -29,7 +29,7 @@ ledgerline-core/
 │   ├── scripts/                # Database migration and bootstrap scripts
 │   │   ├── migrate.js          # Advisory-locked sequential migration runner
 │   │   ├── bootstrap.js        # Secure role, HMAC secret & admin provisioner
-│   │   └── verify_fresh_install.js # Fresh DB verification utility
+│   │   └── verify_install.js   # DB security catalog verification utility
 │   ├── src/
 │   │   ├── config/             # DB pool (db.js) & validated env loader (env.js)
 │   │   ├── routes/             # Auth, Account, Transaction, and Health routers
@@ -89,8 +89,12 @@ ledgerline-core/
    - Enforced on all domain tables (`users`, `accounts`, `account_memberships`, `transactions`, `ledger_postings`, `idempotency_keys`, `audit_logs`).
    - Private schema `ledger_secure` is completely inaccessible to `ledgerline_app`.
 8. **SECURITY DEFINER Search-Path Hardening**:
-   - All 26 privileged functions enforce `SET search_path = pg_catalog, ledger_secure, public, pg_temp`.
+   - All 26 privileged functions enforce explicit, safe search paths with `pg_catalog` prioritized and `pg_temp` last.
    - `TEMPORARY` revoked from database, preventing object shadowing in temporary schemas.
+9. **Reverse-Proxy Rate Limiting**:
+   - Bounded request body parsing (`10kb`). Volumetric rate limiting is placed at the reverse proxy (Nginx/Cloudflare) rather than in-app.
+10. **Browser Token Isolation**:
+    - Tokens stored in `sessionStorage` (tab-scoped) with memory fallback, avoiding persistent `localStorage`. Enterprise deployments should consider `HttpOnly` cookies.
 
 ---
 
