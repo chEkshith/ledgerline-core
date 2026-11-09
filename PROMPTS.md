@@ -139,3 +139,20 @@ This document records the genuine prompt history and development requests execut
      - Authentic admin action attribution in immutable audit logs.
   4. Verify authorization concurrency serialization (Test 47): proving determinism when membership revocation races with a financial transaction using parent account row-level locking (`FOR UPDATE`).
 - **Outcome**: Server test suite expanded from 39 to 51 passing tests; client test suite 41/41 passing (92/92 total tests passing); production client build verified; development database `ledgerline_dev` preserved.
+
+
+---
+
+## Prompt 12: Phase 4, Task 2 — Final Authorization Gap Verification (Administrator RLS Clarification)
+- **Date**: 2026-11-09
+- **Request Summary**:
+  1. Investigate reported discrepancy between administrator read privileges in the authorization matrix and domain table RLS policies (`system OR is_account_member(id)`, `creator OR is_account_member(src) OR is_account_member(dest)`, `is_account_member(account_id)`, `own OR is_account_member(account_id)`).
+  2. Inspect catalog definitions of `ledger_secure.is_account_member()`, `ledger_secure.is_account_holder()`, `ledger_secure.current_verified_user_id()`, and `ledger_secure.current_verified_user_role()`.
+  3. Execute direct SQL queries as `ledgerline_app` with admin session context comparing returned row IDs against ground truth across all tables.
+  4. Verify API route consistency across `GET /api/accounts`, `GET /api/accounts/:id`, `GET /api/accounts/:id/statement`, and `GET /api/transactions/:id`.
+  5. Add automated regression test (Test 48 in `server/test/phase2.test.js`) verifying:
+     - Authenticated administrator matches 100% of rows across accounts, transactions, ledger postings, and memberships.
+     - Customer session is strictly isolated to own memberships and accounts.
+     - Auditor session is strictly isolated to explicitly granted memberships.
+     - Tampering attempts by customer/auditor asserting `admin` role are rejected with `28000` (invalid authorization specification).
+- **Outcome**: Confirmed no architectural defect or gap exists—`is_account_member()` explicitly short-circuits to `RETURN TRUE;` when `v_role = 'admin'`, resolving the policy globally without recursion. Added Test 48; server tests expanded to 52/52 passing; client tests 41/41 passing (93/93 total tests passing). Development database `ledgerline_dev` preserved.

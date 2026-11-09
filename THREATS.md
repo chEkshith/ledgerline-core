@@ -89,6 +89,11 @@ The architectural baseline enforces:
    - Verified immediate authorization cutoff: revoked members cannot execute transactions even if holding valid JWTs.
    - Verified cryptographic assertion anti-tampering: database checks reject forged roles, corrupt signatures, and fake user IDs.
    - Verified concurrency race serialization: parent account row-level locking (`FOR UPDATE`) guarantees deterministic ordering between membership revocation and financial operations, preventing stale authorization execution.
+9. **Administrator RLS Resolution & Non-Recursive Bypass**:
+   - To prevent recursive policy lookups under PostgreSQL `FORCE ROW LEVEL SECURITY`, table policies on `accounts`, `transactions`, `ledger_postings`, and `account_memberships` delegate access verification to `SECURITY DEFINER` function `ledger_secure.is_account_member(p_account_id)`.
+   - The helper function inspects `v_role := ledger_secure.current_verified_user_role()`. When `v_role = 'admin'`, it executes `IF v_role = 'admin' THEN RETURN TRUE; END IF;` immediately, bypassing the membership table lookup.
+   - Consequently, administrators evaluate to `TRUE` for 100% of rows across all accounts, transactions, ledger postings, and memberships, maintaining full administrative visibility.
+   - The admin role cannot be forged by untrusted callers: `current_verified_user_role()` reads strictly from `active_session_contexts`, which is populated only after verifying the HMAC signature and confirming that the authoritative record in `public.users` has `role = 'admin'`. Asserting `role = 'admin'` for customer or auditor accounts fails with SQL error `28000`.
 
 ---
 

@@ -12,6 +12,7 @@ import {
   revokeMembership,
   getAccountDetails,
   getAccountStatement,
+  listUserAccounts,
 } from '../src/services/account.service.js';
 import {
   processTransactionRequest,
@@ -2362,5 +2363,64 @@ describe('LedgerLine Phase 2 Comprehensive Test Suite', () => {
       (err) => /Caller is not an active account_holder on withdrawal source account/.test(err.message),
       'After revocation, subsequent withdrawal must be denied'
     );
+  });
+
+  // ---------------------------------------------------------------------------
+  // 48. Administrator Global Read Access & Customer/Auditor Non-Elevation Matrix
+  // ---------------------------------------------------------------------------
+  it('48. Administrator Global Read Access & Customer/Auditor Non-Elevation Matrix', async () => {
+    // 1. Establish ground truth set via adminClient
+    const allAccountsRes = await adminClient.query('SELECT id FROM public.accounts ORDER BY id');
+    const allTxRes = await adminClient.query('SELECT id FROM public.transactions ORDER BY id');
+    const allPostRes = await adminClient.query('SELECT id FROM public.ledger_postings ORDER BY id');
+    const allMemRes = await adminClient.query('SELECT id FROM public.account_memberships ORDER BY id');
+
+    assert.ok(allAccountsRes.rowCount > 0, 'Database must contain accounts');
+    assert.ok(allTxRes.rowCount > 0, 'Database must contain transactions');
+    assert.ok(allPostRes.rowCount > 0, 'Database must contain postings');
+    assert.ok(allMemRes.rowCount > 0, 'Database must contain memberships');
+
+    // 2. Query under verified admin session context via ledgerline_app
+    await executeWithSession(adminUser.id, 'admin', async (client) => {
+      const adminAcc = await client.query('SELECT id FROM public.accounts ORDER BY id');
+      assert.equal(adminAcc.rowCount, allAccountsRes.rowCount, 'Admin must see 100% of accounts');
+      assert.deepEqual(adminAcc.rows.map(r => r.id), allAccountsRes.rows.map(r => r.id));
+
+      const adminTx = await client.query('SELECT id FROM public.transactions ORDER BY id');
+      assert.equal(adminTx.rowCount, allTxRes.rowCount, 'Admin must see 100% of transactions');
+      assert.deepEqual(adminTx.rows.map(r => r.id), allTxRes.rows.map(r => r.id));
+
+      const adminPost = await client.query('SELECT id FROM public.ledger_postings ORDER BY id');
+      assert.equal(adminPost.rowCount, allPostRes.rowCount, 'Admin must see 100% of ledger postings');
+      assert.deepEqual(adminPost.rows.map(r => r.id), allPostRes.rows.map(r => r.id));
+
+      const adminMem = await client.query('SELECT id FROM public.account_memberships ORDER BY id');
+      assert.equal(adminMem.rowCount, allMemRes.rowCount, 'Admin must see 100% of account memberships');
+      assert.deepEqual(adminMem.rows.map(r => r.id), allMemRes.rows.map(r => r.id));
+    });
+
+    // 3. Verify admin access through API service layer across customer-owned records
+    // Customer B's account details
+    const accBDetails = await getAccountDetails(adminUser.id, 'admin', accountB);
+    assert.equal(accBDetails.id, accountB, 'Admin must be able to read Customer B account details via API');
+
+    // Customer B's account statement
+    const accBStatement = await getAccountStatement(adminUser.id, 'admin', accountB, 20, 0);
+    assert.ok(accBStatement.statement.length > 0, 'Admin must be able to read Customer B account statement via API');
+
+    // All accounts listing
+    const accountsList = await listUserAccounts(adminUser.id, 'admin');
+    assert.equal(accountsList.length, allAccountsRes.rowCount, 'Admin listUserAccounts must return all accounts');
+
+    // 4. Verify Customer A and Auditor visibility remains strictly restricted
+    await executeWithSession(customerA.id, 'customer', async (client) => {
+      const custAcc = await client.query('SELECT id FROM public.accounts WHERE id = $1', [accountB]);
+      assert.equal(custAcc.rowCount, 0, 'Customer A must not see Customer B account');
+    });
+
+    await executeWithSession(auditorUser.id, 'customer', async (client) => {
+      const audAcc = await client.query('SELECT id FROM public.accounts WHERE id = $1', [accountB]);
+      assert.equal(audAcc.rowCount, 0, 'Auditor on Account A must not see Customer B account');
+    });
   });
 });
