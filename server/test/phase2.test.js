@@ -3157,16 +3157,58 @@ describe('LedgerLine Phase 2 Comprehensive Test Suite', () => {
     const ovfUser = (await registerCustomer(`ovf_user_${unique}@test.local`, 'Password123!')).user;
     const ovfAcc = (await createCustomerAccount(ovfUser.id, 'customer', `ACC-OVF-${unique}`)).accountId;
 
-    // Set account balance near MAX_BIGINT (9223372036854775800)
+    // 1. Create an isolated system clearing account with initial balance 0
+    const sysAccRes = await adminClient.query(
+      "INSERT INTO public.accounts (account_number, account_type, system_role_type, currency, current_balance) VALUES ($1, 'system', 'SYSTEM_CASH_VAULT', 'INR', 0) RETURNING id",
+      [`SYS-CLEARING-${unique}`]
+    );
+    const clearingAcc = sysAccRes.rows[0].id;
+
+    // 2. Legitimate setup deposit of 9223372036854775800 paise via financial transaction engine
     const nearMax = '9223372036854775800';
-    await adminClient.query('UPDATE public.accounts SET current_balance = $1 WHERE id = $2', [nearMax, ovfAcc]);
+    const setupKey = `setup_key_${unique}`;
+    const setupRes = await processTransactionRequest({
+      userId: ovfUser.id,
+      role: 'customer',
+      idempotencyKey: setupKey,
+      method: 'POST',
+      path: '/api/transactions',
+      body: {
+        type: 'deposit',
+        amountPaise: nearMax,
+        sourceAccountId: clearingAcc,
+        destinationAccountId: ovfAcc,
+        description: 'Setup initial near-maximum balance via clearing deposit',
+      },
+    });
 
-    const preBal = (await adminClient.query('SELECT current_balance FROM public.accounts WHERE id = $1', [ovfAcc])).rows[0].current_balance;
-    assert.equal(preBal, nearMax, 'Account balance must be initialized near MAX_BIGINT');
+    assert.equal(setupRes.statusCode, 200, 'Setup deposit must post with HTTP 200');
+    assert.equal(setupRes.body.status, 'success');
 
+    // 3. Verify ledger consistency:
+    // - Customer balance equals sum of its ledger postings
+    // - System clearing account has matching debit
+    // - Setup transaction has exactly two postings summing to zero
+    const custBal = (await adminClient.query('SELECT current_balance FROM public.accounts WHERE id = $1', [ovfAcc])).rows[0].current_balance;
+    const custPostings = (await adminClient.query('SELECT sum(signed_amount_paise) as sum_p FROM public.ledger_postings WHERE account_id = $1', [ovfAcc])).rows[0].sum_p;
+    assert.equal(custBal, nearMax, 'Customer balance must equal nearMax');
+    assert.equal(custPostings, nearMax, 'Customer postings sum must equal nearMax');
+
+    const sysBal = (await adminClient.query('SELECT current_balance FROM public.accounts WHERE id = $1', [clearingAcc])).rows[0].current_balance;
+    const sysPostings = (await adminClient.query('SELECT sum(signed_amount_paise) as sum_p FROM public.ledger_postings WHERE account_id = $1', [clearingAcc])).rows[0].sum_p;
+    assert.equal(sysBal, `-${nearMax}`, 'System clearing balance must equal matching negative amount');
+    assert.equal(sysPostings, `-${nearMax}`, 'System clearing postings sum must equal matching negative amount');
+
+    const txPostings = await adminClient.query(
+      'SELECT count(*) as count, sum(signed_amount_paise) as sum_net FROM public.ledger_postings WHERE transaction_id = $1',
+      [setupRes.body.transaction_id]
+    );
+    assert.equal(txPostings.rows[0].count, '2', 'Setup transaction must produce exactly 2 postings');
+    assert.equal(txPostings.rows[0].sum_net, '0', 'Setup postings must sum strictly to zero');
+
+    // 4. Attempt a further 100-paise deposit using a fresh idempotency key
+    // 9223372036854775800 + 100 = 9223372036854775900 > MAX_BIGINT (9223372036854775807)
     const overflowKey = `ovf_tx_key_${unique}`;
-
-    // Attempt deposit of 100 paise: 9223372036854775800 + 100 = 9223372036854775900 > MAX_BIGINT
     await assert.rejects(
       async () => {
         await processTransactionRequest({
@@ -3178,8 +3220,9 @@ describe('LedgerLine Phase 2 Comprehensive Test Suite', () => {
           body: {
             type: 'deposit',
             amountPaise: 100,
-            sourceAccountId: vaultAccount.id,
+            sourceAccountId: clearingAcc,
             destinationAccountId: ovfAcc,
+            description: 'Attempted overflow deposit exceeding MAX_BIGINT',
           },
         });
       },
@@ -3187,25 +3230,50 @@ describe('LedgerLine Phase 2 Comprehensive Test Suite', () => {
       'PostgreSQL balance trigger must reject BIGINT overflow with SQLSTATE 22003'
     );
 
-    // 1. Exactly zero ledger postings remain for overflow attempt
-    const postCount = await adminClient.query('SELECT count(*) FROM public.ledger_postings WHERE account_id = $1', [ovfAcc]);
-    assert.equal(parseInt(postCount.rows[0].count, 10), 0, 'No partial postings may exist after overflow rollback');
+    // 5. Verify failed operation leaves no financial residue:
+    // - No additional posted transaction
+    // - No additional postings
+    // - No balance change
+    // - No committed idempotency record
+    const postTxCount = await adminClient.query("SELECT count(*) FROM public.transactions WHERE destination_account_id = $1 AND status = 'posted'", [ovfAcc]);
+    assert.equal(parseInt(postTxCount.rows[0].count, 10), 1, 'Must remain exactly 1 posted setup transaction');
 
-    // 2. Exactly zero transactions marked posted
-    const txCount = await adminClient.query("SELECT count(*) FROM public.transactions WHERE destination_account_id = $1 AND status = 'posted'", [ovfAcc]);
-    assert.equal(parseInt(txCount.rows[0].count, 10), 0, 'No transaction may be marked posted after overflow rollback');
+    const postCountCust = await adminClient.query('SELECT count(*) FROM public.ledger_postings WHERE account_id = $1', [ovfAcc]);
+    assert.equal(parseInt(postCountCust.rows[0].count, 10), 1, 'Must remain exactly 1 posting for customer account');
 
-    // 3. Cached balance is strictly unchanged
-    const postBal = (await adminClient.query('SELECT current_balance FROM public.accounts WHERE id = $1', [ovfAcc])).rows[0].current_balance;
-    assert.equal(postBal, preBal, 'Cached balance must remain strictly unchanged after overflow');
+    const custBalAfterOvf = (await adminClient.query('SELECT current_balance FROM public.accounts WHERE id = $1', [ovfAcc])).rows[0].current_balance;
+    assert.equal(custBalAfterOvf, nearMax, 'Customer balance must remain strictly unchanged after overflow failure');
 
-    // 4. Idempotency reservation is rolled back
     const idempCheck = await adminClient.query('SELECT * FROM public.idempotency_keys WHERE idempotency_key = $1', [overflowKey]);
     assert.equal(idempCheck.rowCount, 0, 'Rolled-back overflow transaction must leave no idempotency record');
 
-    // 5. Subsequent valid transaction succeeds on the same key after resetting balance to normal
-    await adminClient.query('UPDATE public.accounts SET current_balance = 0 WHERE id = $1', [ovfAcc]);
+    // 6. Restore account through a legitimate withdrawal operation back to the clearing account
+    const restoreKey = `restore_key_${unique}`;
+    const restoreRes = await processTransactionRequest({
+      userId: ovfUser.id,
+      role: 'customer',
+      idempotencyKey: restoreKey,
+      method: 'POST',
+      path: '/api/transactions',
+      body: {
+        type: 'withdrawal',
+        amountPaise: nearMax,
+        sourceAccountId: ovfAcc,
+        destinationAccountId: clearingAcc,
+        description: 'Legitimate restore withdrawal back to clearing account',
+      },
+    });
 
+    assert.equal(restoreRes.statusCode, 200, 'Restoration withdrawal must succeed with HTTP 200');
+    assert.equal(restoreRes.body.status, 'success');
+
+    const custBalRestored = (await adminClient.query('SELECT current_balance FROM public.accounts WHERE id = $1', [ovfAcc])).rows[0].current_balance;
+    assert.equal(custBalRestored, '0', 'Customer balance must be restored to 0');
+
+    const sysBalRestored = (await adminClient.query('SELECT current_balance FROM public.accounts WHERE id = $1', [clearingAcc])).rows[0].current_balance;
+    assert.equal(sysBalRestored, '0', 'System clearing balance must be restored to 0');
+
+    // 7. Retry the previously failed idempotency key with a valid request and verify it succeeds
     const validRes = await processTransactionRequest({
       userId: ovfUser.id,
       role: 'customer',
@@ -3215,12 +3283,24 @@ describe('LedgerLine Phase 2 Comprehensive Test Suite', () => {
       body: {
         type: 'deposit',
         amountPaise: 5000,
-        sourceAccountId: vaultAccount.id,
+        sourceAccountId: clearingAcc,
         destinationAccountId: ovfAcc,
+        description: 'Legitimate retry with safe balance on reused key',
       },
     });
     assert.equal(validRes.statusCode, 200, 'Legitimate retry with safe balance must succeed with HTTP 200');
     assert.equal(validRes.body.status, 'success');
+
+    // 8. Reconcile both accounts against their ledger postings at the end
+    const finalCustBal = (await adminClient.query('SELECT current_balance FROM public.accounts WHERE id = $1', [ovfAcc])).rows[0].current_balance;
+    const finalCustPostings = (await adminClient.query('SELECT sum(signed_amount_paise) as sum_p FROM public.ledger_postings WHERE account_id = $1', [ovfAcc])).rows[0].sum_p;
+    assert.equal(finalCustBal, '5000', 'Final customer balance must match final deposit');
+    assert.equal(finalCustPostings, '5000', 'Final customer postings sum must match balance');
+
+    const finalSysBal = (await adminClient.query('SELECT current_balance FROM public.accounts WHERE id = $1', [clearingAcc])).rows[0].current_balance;
+    const finalSysPostings = (await adminClient.query('SELECT sum(signed_amount_paise) as sum_p FROM public.ledger_postings WHERE account_id = $1', [clearingAcc])).rows[0].sum_p;
+    assert.equal(finalSysBal, '-5000', 'Final clearing balance must match final deposit debit');
+    assert.equal(finalSysPostings, '-5000', 'Final clearing postings sum must match balance');
   });
 
   // ---------------------------------------------------------------------------

@@ -195,3 +195,30 @@ This document records the genuine prompt history and development requests execut
      - `.github/workflows/ci.yml`: GitHub Actions CI pipeline running tests and client build against PostgreSQL 16 container.
   6. Verify all test suites (62 server + 41 client = 103 total passed), verify production client build, commit as `chore: complete Phase 4 release readiness`.
 - **Outcome**: Added Tests 56, 57, 58; server test suite expanded from 59 to 62 passing tests; client test suite 41/41 passing (103/103 total tests passing); fresh migration verified on disposable database; production Vite build clean; all documentation deliverables and CI workflow created; development database `ledgerline_dev` preserved; committed cleanly as `f7674b4`.
+
+---
+
+## Prompt 15: Phase 4 Final Closure Verification, Corrections & GitHub Push
+- **Date**: 2026-11-09
+- **Request Summary**:
+  1. Audit and reconcile final Phase 4 baseline without resetting, rebasing, amending, or squashing existing commits (`f7674b4` and `330a34a` preserved).
+  2. Correct Test 57 to eliminate artificial direct balance update:
+     - Set up an isolated customer account.
+     - Execute legitimate financial transaction depositing `9223372036854775800` paise from an isolated system clearing account.
+     - Verify customer balance matches sum of postings, clearing account has matching negative debit, and postings sum strictly to zero.
+     - Attempt overflow deposit of 100 paise; verify PostgreSQL raises `22003`, leaves no postings, no balance change, and no committed idempotency record.
+     - Restore account balance via a legitimate withdrawal operation back to the clearing account.
+     - Retry the previously failed idempotency key with a safe balance and verify success.
+     - Reconcile both accounts against their ledger postings at the end.
+  3. Reassess Zod production dependency advisory (GHSA-mrhx-c7xc-m3w5):
+     - Search entire codebase for `z.array`, `z.set`, `z.record`, or dynamic collection validation.
+     - Document that Zod is never imported or invoked in any active route, controller, or service.
+     - Mark 10 KB Express body limit as defense-in-depth and record advisory as residual dependency risk until upgraded.
+  4. Verify PostgreSQL SECURITY DEFINER PUBLIC execution using `aclexplode` with `grantee = 0` across all 26 functions, confirming 0 of 26 executable by PUBLIC and search paths prioritize `pg_catalog` first and `pg_temp` last.
+  5. Correct security documentation:
+     - Note that Scrypt protects password hashes at rest, not online login brute force; ingress rate limiting is a mandatory deployment gate.
+     - Remove absolute "None" residual risk claims and qualify with operational realities.
+     - Replace RFC 8785 claims with deterministic JSON canonicalization.
+     - Remove unmeasured `~1-5ms` latency claim from `DEMO.md` (to be measured live).
+  6. Reconcile remote history: confirm `origin` points to `https://github.com/chEkshith/ledgerline-core.git`, verify Phase 3 commit `5d80f1a` is an ancestor (`git merge-base --is-ancestor origin/main HEAD`), and push all verified commits without force flags.
+- **Outcome**: Test 57 rewritten to use 100% balanced financial engine flow; all 62 server tests and 41 client tests (103 total) passed cleanly; documentation reconciled; committed as `test: close final LedgerLine verification gaps`; pushed cleanly to `origin/main`.

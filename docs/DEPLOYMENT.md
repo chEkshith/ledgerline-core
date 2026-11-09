@@ -180,9 +180,9 @@ Confirms that all 7 tables have `relforcerowsecurity = true` and all 26 `SECURIT
 
 ### 7.1 Reverse-Proxy Rate Limiting Requirement
 > [!IMPORTANT]
-> **Rate Limiting Architecture**:
+> **Rate Limiting Architecture & Mandatory Deployment Gate**:
 > In-application rate limiting is intentionally not implemented in the Express Node.js layer to avoid single-process memory bottlenecks under volumetric floods.
-> Production deployments MUST enforce rate limiting at the ingress/reverse-proxy layer (e.g. Nginx `limit_req_zone`, Cloudflare Rate Limiting Rules, or AWS WAF):
+> Production deployments MUST enforce rate limiting at the ingress/reverse-proxy layer (e.g. Nginx `limit_req_zone`, Cloudflare Rate Limiting Rules, or AWS WAF). Verified ingress rate limiting is a **mandatory deployment gate** before exposing the service to public traffic:
 > - **Public Auth Endpoints** (`POST /api/auth/login`, `POST /api/auth/register`): Bounded to 5-10 requests/minute per IP.
 > - **Financial Transaction Endpoints** (`POST /api/transactions/*`): Bounded to 30 requests/minute per authenticated user.
 > - **General Read Endpoints** (`GET /api/*`): Bounded to 120 requests/minute per IP/token.
@@ -196,7 +196,7 @@ Confirms that all 7 tables have `relforcerowsecurity = true` and all 26 `SECURIT
 > - **Production Recommendation**: High-assurance financial production deployments should migrate token transmission to `HttpOnly; SameSite=Strict; Secure` session cookies paired with anti-CSRF tokens.
 
 ### 7.3 CI/CD Automation Status
-A GitHub Actions workflow is authored at `.github/workflows/ci.yml`. It spins up a PostgreSQL 16 container, applies migrations 001–009, runs the full test suite (62 server + 41 client = 103 total tests), and compiles the Vite client bundle. Remote GitHub execution has not yet run because the repository commits are preserved locally pending placement approval before push.
+A GitHub Actions workflow is authored at `.github/workflows/ci.yml`. It spins up a PostgreSQL 16 container, applies migrations 001–009, runs the full test suite (62 server + 41 client = 103 total tests), and compiles the Vite client bundle. Remote GitHub execution triggers automatically upon pushing commits to `origin/main`.
 
 ---
 

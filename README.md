@@ -36,7 +36,7 @@ ledgerline-core/
 │   │   ├── controllers/        # Request/Response orchestration
 │   │   ├── services/           # Business logic, idempotency, session contexts
 │   │   ├── middleware/         # Auth verification, Helmet, CORS, Error handling
-│   │   └── utils/              # RFC 8785 JSON canonicalizer, HMAC, scrypt, sessionContext
+│   │   └── utils/              # Deterministic JSON canonicalizer, HMAC, scrypt, sessionContext
 │   ├── test/                   # Automated integration test suite (62 tests)
 │   │   └── phase2.test.js      # 62-scenario comprehensive integration test suite
 │   ├── package.json            # Server dependencies & npm scripts

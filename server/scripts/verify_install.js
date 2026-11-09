@@ -52,7 +52,12 @@ async function verifyInstallation() {
         r.rolname AS owner,
         p.proconfig,
         has_function_privilege('public', p.oid, 'EXECUTE') AS public_execute,
-        has_function_privilege('ledgerline_app', p.oid, 'EXECUTE') AS app_execute
+        has_function_privilege('ledgerline_app', p.oid, 'EXECUTE') AS app_execute,
+        EXISTS (
+          SELECT 1
+          FROM aclexplode(COALESCE(p.proacl, acldefault('f', p.proowner))) a
+          WHERE a.grantee = 0 AND a.privilege_type = 'EXECUTE'
+        ) AS public_aclexplode_execute
       FROM pg_proc p
       JOIN pg_namespace n ON n.oid = p.pronamespace
       JOIN pg_roles r ON r.oid = p.proowner
@@ -63,14 +68,14 @@ async function verifyInstallation() {
 
     console.log(`\n2. Auditing SECURITY DEFINER functions (${funcRes.rows.length} found):`);
     for (const f of funcRes.rows) {
-      if (f.public_execute) {
+      if (f.public_execute || f.public_aclexplode_execute) {
         throw new Error(`Security violation: PUBLIC has EXECUTE on ${f.schema_name}.${f.function_name}!`);
       }
       const configStr = (f.proconfig || []).join('; ');
-      if (!configStr.includes('pg_temp')) {
-        throw new Error(`Security violation: ${f.schema_name}.${f.function_name} missing pg_temp in search_path!`);
+      if (!configStr.startsWith('search_path=pg_catalog') || !configStr.endsWith('pg_temp')) {
+        throw new Error(`Security violation: ${f.schema_name}.${f.function_name} must prioritize pg_catalog and end with pg_temp!`);
       }
-      console.log(`   - ${f.schema_name}.${f.function_name} | Owner: ${f.owner} | PUBLIC: ${f.public_execute} | Path: ${configStr}`);
+      console.log(`   - ${f.schema_name}.${f.function_name} | Owner: ${f.owner} | PUBLIC: false | Path: ${configStr}`);
     }
 
     console.log(`\n✔ All ${rlsRes.rows.length} domain tables have FORCE RLS enabled.`);

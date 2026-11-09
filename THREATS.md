@@ -25,7 +25,7 @@ The security architecture enforces:
 | :--- | :--- | :--- | :--- |
 | **Spoofing** | Impersonation of legitimate users or forging database session identity. | Cryptographic HMAC assertions with 30s expiry and single-use nonce; verified database session context bound to `(pg_backend_pid(), txid_current())`; scrypt password hashing; admin action attribution verifying authoritative database role in real time. | Database & Backend |
 | **Tampering** | Modifying transaction amounts, mutating historical postings, altering account balances. | Double-entry zero-sum ledgering ($\sum \Delta = 0$); integer paise arithmetic (`BIGINT`); append-only triggers on `ledger_postings` and `audit_logs`; `trg_protect_finalized_transactions` preventing update/deletion of posted/refused transactions; deferred balance reconciliation at commit; frontend string-based BigInt parsing preventing floating-point rounding. | Database Triggers |
-| **Repudiation** | An actor denies executing a financial transaction or administrative action. | Immutable audit log trail with verified actor ID, authoritative role, timestamp, and metadata; cryptographic request payload hashing with RFC 8785 canonicalization. | Database & Triggers |
+| **Repudiation** | An actor denies executing a financial transaction or administrative action. | Immutable audit log trail with verified actor ID, authoritative role, timestamp, and metadata; cryptographic request payload hashing with deterministic JSON canonicalization. | Database & Triggers |
 | **Information Disclosure** | Leakage of balances, transaction history, credentials, or PII. | PostgreSQL `FORCE ROW LEVEL SECURITY` across all 7 domain tables; non-recursive RLS helpers; posting RLS strictly preventing cross-account leakage; sanitized error handler masking internal errors; automatic token clearance on session expiry. | Database (RLS) |
 | **Denial of Service (DoS)** | Deadlocks on concurrent transfers, replay storms, connection pool exhaustion. | Deterministic ascending UUID account locking; request idempotency reservation with cached replay; 3s database lock timeout; advisory locking on migrations (`pg_advisory_lock`); connection discard (`client.release(true)`) preventing pool contamination on unconfirmed cleanup; 10 KB request body limit. | Database & Express |
 | **Elevation of Privilege** | Runtime application role modifying permissions, bypassing RLS, or creating admin accounts. | `ledgerline_owner` is `NOLOGIN`, `NOSUPERUSER`, `NOBYPASSRLS`; `ledgerline_app` has strictly read-mostly table grants; direct `UPDATE` on `idempotency_keys` revoked; user registration restricted to `customer` role; demoted/stale JWTs blocked by database assertion checks; `TEMPORARY` privilege revoked from database preventing `pg_temp` object injection; `SECURITY DEFINER` search paths hardened (`pg_catalog, ledger_secure, public, pg_temp`). | Database Grants |
@@ -122,7 +122,7 @@ The security architecture enforces:
   - **Database-Enforced**: `SECURITY DEFINER` functions use static SQL and explicit schema-qualified references (`public.accounts`, `ledger_secure.active_session_contexts`). Zero dynamic `EXECUTE '...'` blocks.
   - **Input Validation**: Zod schemas enforce strict data types (UUID v4, integer strings `/^\d+$/`, strict enums).
 - **Verification Test**: Test 26 (`Input validation: rejects unsafe integers, floats, negatives, and non-digits`) and Test 34 (`Search-path shadow resistance`).
-- **Residual Risk**: None for parameterized queries and static function definitions.
+- **Residual Risk**: Zero risk in current static queries; residual exposure exists if future raw SQL concatenation is introduced without peer review or if underlying `pg` driver parser has an unpatched flaw.
 
 ---
 
@@ -132,10 +132,10 @@ The security architecture enforces:
 - **Attack Vector**: Firing parallel HTTP requests with the same idempotency key or rapid successive submissions.
 - **Defensive Mechanism**:
   - **Database-Enforced**: Unique index `UNIQUE (user_id, key)` on `public.idempotency_keys`. The first request atomically reserves the key (`in_progress`); concurrent contenders wait on row lock and receive cached response upon resolution.
-  - **Backend-Enforced**: RFC 8785 canonical payload hashing. If payload differs on key reuse, raises `HTTP 409 Conflict`.
+  - **Backend-Enforced**: Deterministic JSON canonical payload hashing. If payload differs on key reuse, raises `HTTP 409 Conflict`.
   - **Frontend-Enforced**: `transitionReversalState` and API client lock submit buttons and preserve idempotency key across network failures.
 - **Verification Test**: Test 9 (`Exact idempotency replay`), Test 10 (`Payload mismatch 409`), Test 11 (`Concurrent duplicate requests`), and Test 49 (`10 Simultaneous Identical Requests`).
-- **Residual Risk**: None; duplicate execution is prevented at the database unique index level.
+- **Residual Risk**: Duplicate execution is blocked by the unique index constraint; residual exposure exists if the index is dropped during migration maintenance.
 
 ---
 
@@ -149,7 +149,7 @@ The security architecture enforces:
     - **Deterministic Lock Ordering**: Multi-account transfers acquire locks in ascending UUID order: `LEAST(src, dest)` followed by `GREATEST(src, dest)`, preventing deadlocks.
     - **Check Constraint**: `CHECK (cached_balance_paise >= 0)` on customer accounts prevents negative balances.
 - **Verification Test**: Test 12 (`Concurrent withdrawals: account balance cannot become negative`) and Test 13 (`Opposite-direction transfers: concurrent A->B and B->A succeed without deadlock`).
-- **Residual Risk**: None; database constraint provides mathematical guarantee.
+- **Residual Risk**: Enforced mathematically by database CHECK constraint; residual exposure exists only if CHECK constraint is dropped or altered.
 
 ---
 
@@ -160,7 +160,7 @@ The security architecture enforces:
 - **Defensive Mechanism**:
   - **Database-Enforced**: `process_reversal()` acquires row-level lock on the target transaction (`SELECT ... FOR UPDATE`). Checks if a reversal transaction already exists. The second concurrent attempt detects `ALREADY_REVERSED` and raises HTTP 422.
 - **Verification Test**: Test 22 (`Duplicate reversal`), Test 52 (`Concurrent Reversal Protection: Dual Administrator Race`), and client reversal state machine tests.
-- **Residual Risk**: None; serialized by transaction row lock.
+- **Residual Risk**: Serialized by transaction row lock; residual risk exists if administrative reversal logic is bypassed via direct SQL manipulation.
 
 ---
 
@@ -202,7 +202,7 @@ The security architecture enforces:
   - **Backend-Enforced**: Zod validator enforces `/^\d+$/` digit string validation.
   - **Frontend-Enforced**: `rupeesToPaise` uses string splitting and native `BigInt` parsing, prohibiting floating-point math.
 - **Verification Test**: Test 26 (`Input validation`), Test 54 (`Monetary Precision & Boundary Enforcement Matrix`), and Test 57 (`Actual Monetary Overflow: Database BIGINT Balance Arithmetic Exceedance and Atomic Rollback`).
-- **Residual Risk**: None; overflow triggers database exception rather than silent wrapping.
+- **Residual Risk**: Overflow triggers database exception rather than silent wrapping; residual risk exists if input exceeds string length limits before validation.
 
 ---
 
@@ -214,7 +214,7 @@ The security architecture enforces:
   - **Backend-Enforced**:
     - Passwords hashed using `scrypt` with 16-byte cryptographically random salt and 64-byte derived key.
     - Constant-time verification via `crypto.timingSafeEqual` prevents timing attacks.
-  - **Residual Risk**: In-app rate limiting is not implemented in Express code; rate limiting must be enforced at the reverse proxy (Nginx/Cloudflare) as documented in `docs/DEPLOYMENT.md`.
+  - **Residual Risk & Mandatory Deployment Gate**: Scrypt protects password hashes at rest; it does NOT prevent online credential guessing or brute force attacks against active endpoints. In-application rate limiting is not implemented in Express. Ingress rate limiting (via Nginx or Cloudflare) is a **mandatory deployment gate** before exposing the service to public traffic.
 
 ---
 

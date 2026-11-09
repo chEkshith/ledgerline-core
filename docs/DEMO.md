@@ -21,7 +21,7 @@ Traditional financial web applications routinely place double-spending defenses,
 - **Integer Minor Currency**: All monetary amounts are handled strictly as integer paise (`BIGINT`, ₹1 = 100 paise), guaranteeing zero rounding loss from UI to disk.
 - **Cryptographic Assertion Lifecycle**: Identity assertions are signed with HMAC-SHA256 and committed independently before financial processing begins, surviving rollbacks.
 - **PostgreSQL Row-Level Security (`FORCE RLS`)**: Non-recursive security functions isolate tenant accounts and postings at the engine level.
-- **Transactional Idempotency**: Atomic reservation, RFC 8785 payload hashing, and cached replays eliminate duplicate debits under concurrent storms.
+- **Transactional Idempotency**: Atomic reservation, deterministic JSON canonical payload hashing, and cached replays eliminate duplicate debits under concurrent storms.
 - **Deferred Commit Reconciliation**: An exclusive trigger runs at `COMMIT` time, independently summing all postings to mathematically verify cached balances.
 
 ### 3. Key Innovations
@@ -68,7 +68,7 @@ Traditional financial web applications routinely place double-spending defenses,
 2. **Observe**:
    - Live status: `OK`
    - Database Pool: `Connected`
-   - Ping latency: Localhost loopback response (typically ~1-5ms on local test harness)
+   - Ping latency: Measured live during demonstration (dependent on environment network characteristics)
    - Zero configuration errors.
 3. **Presenter Script**:
    > *"Welcome to LedgerLine. We're looking at the live system health probe. Notice the low-latency database connectivity. LedgerLine enforces banking-grade guarantees directly at the database tier using integer paise arithmetic, RLS, and append-only triggers."*
