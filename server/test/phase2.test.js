@@ -3042,4 +3042,202 @@ describe('LedgerLine Phase 2 Comprehensive Test Suite', () => {
     `);
     assert.equal(check9.rowCount, 0, 'Invariant 9: Idempotency mappings do not point to missing or inconsistent transactions');
   });
+
+  // ---------------------------------------------------------------------------
+  // 56. Posted Transaction & Ledger Immutability: Runtime Role and Trigger Enforcement
+  // ---------------------------------------------------------------------------
+  it('56. Posted Transaction & Ledger Immutability: Runtime Privileges and Trigger Enforcement', async () => {
+    // 1. Fetch a posted transaction and its postings
+    const txRes = await adminClient.query(`
+      SELECT t.id, t.amount_paise, p.id as posting_id
+      FROM public.transactions t
+      JOIN public.ledger_postings p ON p.transaction_id = t.id
+      WHERE t.status = 'posted'
+      LIMIT 1
+    `);
+    assert.ok(txRes.rowCount > 0, 'Posted transaction must exist for immutability testing');
+    const { id: postedTxId, posting_id: postingId } = txRes.rows[0];
+
+    // 2. Direct operations as runtime application role (ledgerline_app)
+    await assert.rejects(
+      async () => {
+        await pool.query('UPDATE public.transactions SET amount_paise = amount_paise + 1 WHERE id = $1', [postedTxId]);
+      },
+      (err) => err.code === '42501' || /permission denied/.test(err.message),
+      'Runtime role ledgerline_app must be denied UPDATE grant on transactions'
+    );
+
+    await assert.rejects(
+      async () => {
+        await pool.query('DELETE FROM public.transactions WHERE id = $1', [postedTxId]);
+      },
+      (err) => err.code === '42501' || /permission denied/.test(err.message),
+      'Runtime role ledgerline_app must be denied DELETE grant on transactions'
+    );
+
+    await assert.rejects(
+      async () => {
+        await pool.query('UPDATE public.ledger_postings SET amount_paise = 999 WHERE id = $1', [postingId]);
+      },
+      (err) => err.code === '42501' || /permission denied/.test(err.message),
+      'Runtime role ledgerline_app must be denied UPDATE grant on ledger_postings'
+    );
+
+    await assert.rejects(
+      async () => {
+        await pool.query('DELETE FROM public.ledger_postings WHERE id = $1', [postingId]);
+      },
+      (err) => err.code === '42501' || /permission denied/.test(err.message),
+      'Runtime role ledgerline_app must be denied DELETE grant on ledger_postings'
+    );
+
+    await assert.rejects(
+      async () => {
+        await pool.query(
+          `INSERT INTO public.ledger_postings (transaction_id, account_id, entry_type, amount_paise, signed_amount_paise, sequence_number)
+           VALUES ($1, $2, 'DEBIT', 100, -100, 3)`,
+          [postedTxId, accountA]
+        );
+      },
+      (err) => err.code === '42501' || /permission denied/.test(err.message),
+      'Runtime role ledgerline_app must be denied direct INSERT grant on ledger_postings'
+    );
+
+    // 3. Trigger enforcement even under privileged owner role
+    await assert.rejects(
+      async () => {
+        await adminClient.query('UPDATE public.transactions SET amount_paise = amount_paise + 1 WHERE id = $1', [postedTxId]);
+      },
+      (err) => err.code === '23514' && /(?:is finalized|Finalized transactions|Prohibited mutation)/i.test(err.message),
+      'Trigger trg_protect_finalized_transactions must block UPDATE on posted transactions'
+    );
+
+    await assert.rejects(
+      async () => {
+        await adminClient.query('DELETE FROM public.transactions WHERE id = $1', [postedTxId]);
+      },
+      (err) => err.code === '23514' && /(?:is finalized|Finalized transactions|Prohibited mutation)/i.test(err.message),
+      'Trigger trg_protect_finalized_transactions must block DELETE on posted transactions'
+    );
+
+    await assert.rejects(
+      async () => {
+        await adminClient.query('UPDATE public.ledger_postings SET amount_paise = 999 WHERE id = $1', [postingId]);
+      },
+      (err) => err.code === '23514' && /strictly append-only/.test(err.message),
+      'Trigger trg_append_only_postings must block UPDATE on ledger_postings'
+    );
+
+    await assert.rejects(
+      async () => {
+        await adminClient.query('DELETE FROM public.ledger_postings WHERE id = $1', [postingId]);
+      },
+      (err) => err.code === '23514' && /strictly append-only/.test(err.message),
+      'Trigger trg_append_only_postings must block DELETE on ledger_postings'
+    );
+
+    await assert.rejects(
+      async () => {
+        await adminClient.query(
+          `INSERT INTO public.ledger_postings (transaction_id, account_id, entry_type, amount_paise, signed_amount_paise, sequence_number)
+           VALUES ($1, $2, 'DEBIT', 100, -100, 3)`,
+          [postedTxId, accountA]
+        );
+      },
+      (err) => err.code === '25000' && /Cannot insert postings for transaction .* with status posted/.test(err.message),
+      'Trigger trg_prevent_extra_postings must block inserting additional postings on posted transactions'
+    );
+  });
+
+  // ---------------------------------------------------------------------------
+  // 57. Actual Monetary Overflow: Database BIGINT Balance Arithmetic Rollback
+  // ---------------------------------------------------------------------------
+  it('57. Actual Monetary Overflow: Database BIGINT Balance Arithmetic Exceedance and Atomic Rollback', async () => {
+    const unique = Date.now();
+    const ovfUser = (await registerCustomer(`ovf_user_${unique}@test.local`, 'Password123!')).user;
+    const ovfAcc = (await createCustomerAccount(ovfUser.id, 'customer', `ACC-OVF-${unique}`)).accountId;
+
+    // Set account balance near MAX_BIGINT (9223372036854775800)
+    const nearMax = '9223372036854775800';
+    await adminClient.query('UPDATE public.accounts SET current_balance = $1 WHERE id = $2', [nearMax, ovfAcc]);
+
+    const preBal = (await adminClient.query('SELECT current_balance FROM public.accounts WHERE id = $1', [ovfAcc])).rows[0].current_balance;
+    assert.equal(preBal, nearMax, 'Account balance must be initialized near MAX_BIGINT');
+
+    const overflowKey = `ovf_tx_key_${unique}`;
+
+    // Attempt deposit of 100 paise: 9223372036854775800 + 100 = 9223372036854775900 > MAX_BIGINT
+    await assert.rejects(
+      async () => {
+        await processTransactionRequest({
+          userId: ovfUser.id,
+          role: 'customer',
+          idempotencyKey: overflowKey,
+          method: 'POST',
+          path: '/api/transactions',
+          body: {
+            type: 'deposit',
+            amountPaise: 100,
+            sourceAccountId: vaultAccount.id,
+            destinationAccountId: ovfAcc,
+          },
+        });
+      },
+      (err) => err.code === '22003' || /bigint out of range/i.test(err.message),
+      'PostgreSQL balance trigger must reject BIGINT overflow with SQLSTATE 22003'
+    );
+
+    // 1. Exactly zero ledger postings remain for overflow attempt
+    const postCount = await adminClient.query('SELECT count(*) FROM public.ledger_postings WHERE account_id = $1', [ovfAcc]);
+    assert.equal(parseInt(postCount.rows[0].count, 10), 0, 'No partial postings may exist after overflow rollback');
+
+    // 2. Exactly zero transactions marked posted
+    const txCount = await adminClient.query("SELECT count(*) FROM public.transactions WHERE destination_account_id = $1 AND status = 'posted'", [ovfAcc]);
+    assert.equal(parseInt(txCount.rows[0].count, 10), 0, 'No transaction may be marked posted after overflow rollback');
+
+    // 3. Cached balance is strictly unchanged
+    const postBal = (await adminClient.query('SELECT current_balance FROM public.accounts WHERE id = $1', [ovfAcc])).rows[0].current_balance;
+    assert.equal(postBal, preBal, 'Cached balance must remain strictly unchanged after overflow');
+
+    // 4. Idempotency reservation is rolled back
+    const idempCheck = await adminClient.query('SELECT * FROM public.idempotency_keys WHERE idempotency_key = $1', [overflowKey]);
+    assert.equal(idempCheck.rowCount, 0, 'Rolled-back overflow transaction must leave no idempotency record');
+
+    // 5. Subsequent valid transaction succeeds on the same key after resetting balance to normal
+    await adminClient.query('UPDATE public.accounts SET current_balance = 0 WHERE id = $1', [ovfAcc]);
+
+    const validRes = await processTransactionRequest({
+      userId: ovfUser.id,
+      role: 'customer',
+      idempotencyKey: overflowKey,
+      method: 'POST',
+      path: '/api/transactions',
+      body: {
+        type: 'deposit',
+        amountPaise: 5000,
+        sourceAccountId: vaultAccount.id,
+        destinationAccountId: ovfAcc,
+      },
+    });
+    assert.equal(validRes.statusCode, 200, 'Legitimate retry with safe balance must succeed with HTTP 200');
+    assert.equal(validRes.body.status, 'success');
+  });
+
+  // ---------------------------------------------------------------------------
+  // 58. Comprehensive Database Reconciliation: Zero Stale In-Progress Idempotency Keys
+  // ---------------------------------------------------------------------------
+  it('58. Comprehensive Database Reconciliation: Zero Stale In-Progress Keys and Invariant Consistency', async () => {
+    // Verify that NO committed in_progress idempotency records exist in database
+    const staleIdemp = await adminClient.query("SELECT count(*) FROM public.idempotency_keys WHERE status = 'in_progress'");
+    assert.equal(parseInt(staleIdemp.rows[0].count, 10), 0, 'Zero in_progress idempotency records may exist in committed state');
+
+    // Verify all resolved keys reference valid, existing transactions
+    const resolvedCheck = await adminClient.query(`
+      SELECT count(*)
+      FROM public.idempotency_keys k
+      LEFT JOIN public.transactions t ON t.id = k.transaction_id
+      WHERE k.status = 'resolved' AND (k.transaction_id IS NULL OR t.id IS NULL)
+    `);
+    assert.equal(parseInt(resolvedCheck.rows[0].count, 10), 0, 'All resolved idempotency keys must reference valid transactions');
+  });
 });

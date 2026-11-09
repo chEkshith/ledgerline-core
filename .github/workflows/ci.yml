@@ -1,0 +1,89 @@
+name: LedgerLine CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test-and-build:
+    name: Test & Build Pipeline
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: ledgerline_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: test_admin_password_123!
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20 LTS
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: |
+            server/package-lock.json
+            client/package-lock.json
+
+      - name: Install Server Dependencies
+        run: npm --prefix server ci
+
+      - name: Install Client Dependencies
+        run: npm --prefix client ci
+
+      - name: Configure Test Environment
+        run: |
+          cat << 'EOF' > server/.env.test
+          NODE_ENV=test
+          PORT=5001
+          HOST=localhost
+          DB_HOST=localhost
+          DB_PORT=5432
+          DB_NAME=ledgerline_test
+          DB_USER=ledgerline_app
+          DB_PASSWORD=test_app_password_123!
+          ADMIN_DB_USER=postgres
+          ADMIN_DB_PASSWORD=test_admin_password_123!
+          IDENTITY_HMAC_SECRET=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+          JWT_SECRET=super_secret_test_jwt_key_that_is_at_least_32_characters_long!
+          HMAC_KEY_VERSION=1
+          INITIAL_ADMIN_EMAIL=admin@ledgerline.test
+          INITIAL_ADMIN_PASSWORD=AdminTestPassword123!
+          CLIENT_ORIGIN=http://localhost:5173
+          EOF
+
+      - name: Run Database Migrations & Bootstrap
+        env:
+          NODE_ENV: test
+        run: |
+          cd server
+          node scripts/migrate.js
+          node scripts/bootstrap.js
+
+      - name: Execute Server Integration Test Suite (62 tests)
+        run: npm --prefix server test
+
+      - name: Execute Client Unit & Precision Test Suite (41 tests)
+        run: npm --prefix client test
+
+      - name: Build Production Client Assets (Vite)
+        run: npm --prefix client run build
+
+      - name: Verify Clean Production Artifacts
+        run: |
+          test -d client/dist
+          test -f client/dist/index.html

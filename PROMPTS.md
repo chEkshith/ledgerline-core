@@ -172,3 +172,26 @@ This document records the genuine prompt history and development requests execut
   5. Implement monetary precision and boundary tests verifying rejection of zeros, negatives, decimals, exponential notation, non-numeric strings, NaN, Infinity, and unsafe JS floats (`> MAX_SAFE_INTEGER`), while accepting valid minor currency and large BIGINT strings.
   6. Execute independent database reconciliation verifying all 9 financial consistency invariants return zero violations.
 - **Outcome**: Added Tests 49 through 55 in `server/test/phase2.test.js`; server test suite expanded from 52 to 59 passing tests; client test suite 41/41 passing (100/100 total tests passing); production client build clean (6.96s); development database `ledgerline_dev` preserved.
+
+---
+
+## Prompt 14: Phase 4, Task 4 — Final Security Audit, Production Readiness, Documentation and Hackathon Submission Preparation
+- **Date**: 2026-11-09
+- **Request Summary**:
+  1. Complete final Task 4 of Phase 4 and preserve all existing commits (`5d80f1a`, `32b8bee`, `6e82ea6`, `8d6a092`, `dfe8a66`). Preserve `ledgerline_dev` untouched.
+  2. Verify clean database installation from empty state on disposable database (`ledgerline_migration_check`): sequentially run migrations 001–009 and bootstrap, verify all 7 tables have `relforcerowsecurity = true`, verify all 26 `SECURITY DEFINER` functions created, then cleanly drop disposable database.
+  3. Address Task 3 evidence gaps with automated tests in `server/test/phase2.test.js`:
+     - Test 56: Posted transaction and ledger posting immutability under runtime role `ledgerline_app` (permission denied 42501) and owner triggers (trigger enforcement 23514).
+     - Test 57: Actual monetary overflow near `MAX_BIGINT` (`9223372036854775800` paise) proving PostgreSQL arithmetic exception `22003`, atomic rollback, and subsequent retry.
+     - Test 58: Zero committed in-progress idempotency keys and full reconciliation.
+  4. Perform production security audit across auth, API security, secrets, logging/health, and dependencies.
+  5. Author comprehensive documentation suite:
+     - `docs/API.md`: Complete REST API reference with integer paise examples, status codes, and idempotency replay/conflict behaviors.
+     - `docs/ARCHITECTURE.md`: Monorepo layout, Mermaid architecture and transaction lifecycle sequence diagrams, 7-table data model reference, and the 9 financial invariants.
+     - `docs/DEPLOYMENT.md`: Production deployment guide, managed PostgreSQL requirements, connection pooling, SSL, secrets generation, health checks, backup/restore runbooks.
+     - `docs/DEMO.md`: 5-minute hackathon demo runbook with timestamped steps using safe local data and concise project write-up.
+     - `THREATS.md`: Updated STRIDE matrix and exhaustive analysis of all 17 adversarial threat scenarios.
+     - `SUBMISSION.md`: Hackathon submission checklist covering all deliverables.
+     - `.github/workflows/ci.yml`: GitHub Actions CI pipeline running tests and client build against PostgreSQL 16 container.
+  6. Verify all test suites (62 server + 41 client = 103 total passed), verify production client build, commit as `chore: complete Phase 4 release readiness`.
+- **Outcome**: Added Tests 56, 57, 58; server test suite expanded from 59 to 62 passing tests; client test suite 41/41 passing (103/103 total tests passing); fresh migration verified on disposable database; production Vite build clean; all documentation deliverables and CI workflow created; development database `ledgerline_dev` preserved.
