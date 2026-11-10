@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useSearchParams, Link } from 'react-router-dom';
-import { useAuth } from '../context/AuthContext';
 import * as api from '../services/api';
 import {
   rupeesToPaise,
@@ -20,11 +19,65 @@ import {
   Info,
   RotateCcw,
   Repeat,
+  Building,
+  Wallet,
 } from 'lucide-react';
 import Alert from '../components/Alert';
+import Modal from '../components/Modal';
+import {
+  Badge,
+  Button,
+  ButtonLink,
+  Card,
+  CardBody,
+  CardHeader,
+  Field,
+  Input,
+  InputPrefix,
+  PageHeader,
+  Select,
+  useToast,
+} from '../components/ui';
+
+const operationMeta = {
+  deposit: {
+    label: 'Deposit',
+    description: 'Vault → account',
+    icon: ArrowDownLeft,
+    tone: 'success',
+    activeClass: 'border-emerald-300 bg-emerald-50/60 ring-1 ring-emerald-200',
+    iconClass: 'bg-success-soft text-success',
+  },
+  withdraw: {
+    label: 'Withdraw',
+    description: 'Account → vault',
+    icon: ArrowUpRight,
+    tone: 'warning',
+    activeClass: 'border-amber-300 bg-amber-50/60 ring-1 ring-amber-200',
+    iconClass: 'bg-warning-soft text-warning',
+  },
+  transfer: {
+    label: 'Transfer',
+    description: 'Account → account',
+    icon: ArrowLeftRight,
+    tone: 'info',
+    activeClass: 'border-blue-300 bg-blue-50/60 ring-1 ring-blue-200',
+    iconClass: 'bg-accent-soft text-accent',
+  },
+};
+
+function apiTypeFor(operationType) {
+  return operationType === 'withdraw' ? 'withdrawal' : operationType;
+}
+
+function labelForType(type) {
+  if (type === 'withdrawal') return 'Withdrawal';
+  if (!type) return 'Transaction';
+  return type.charAt(0).toUpperCase() + type.slice(1);
+}
 
 export default function Operations() {
-  const { user } = useAuth();
+  const toast = useToast();
   const [searchParams, setSearchParams] = useSearchParams();
 
   const [operationType, setOperationType] = useState(searchParams.get('type') || 'transfer');
@@ -35,76 +88,91 @@ export default function Operations() {
   );
   const [amountRupees, setAmountRupees] = useState('');
 
-  // Active Form Idempotency Key
   const [idempotencyKey, setIdempotencyKey] = useState(generateIdempotencyKey());
+  const [lastAttempt, setLastAttempt] = useState(null);
+  const [review, setReview] = useState(null);
+  const [modalError, setModalError] = useState(null);
 
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
   const [result, setResult] = useState(null);
-  const [copiedKey, setCopiedKey] = useState(false);
 
-  // Last settled transaction payload and key for genuine replay demonstration
   const [lastSettledTx, setLastSettledTx] = useState(null);
   const [replaying, setReplaying] = useState(false);
 
-  // Load user accounts and vault account
   const loadAccounts = useCallback(async () => {
     try {
       const list = await api.listAccounts();
       setAccounts(list || []);
-
-      const vault = list.find((a) => a.system_role_type === 'SYSTEM_CASH_VAULT');
-      const firstCustomer = list.find((a) => a.account_type === 'customer');
-
-      if (operationType === 'deposit') {
-        if (vault) setSourceAccountId(vault.id);
-        if (!destinationAccountId && firstCustomer) setDestinationAccountId(firstCustomer.id);
-      } else if (operationType === 'withdraw') {
-        if (!sourceAccountId && firstCustomer) setSourceAccountId(firstCustomer.id);
-        if (vault) setDestinationAccountId(vault.id);
-      } else if (operationType === 'transfer') {
-        if (!sourceAccountId && firstCustomer) setSourceAccountId(firstCustomer.id);
-      }
     } catch {
-      setError('Failed to load accounts for transfer setup');
+      setError('Failed to load accounts for money movement setup');
     }
-  }, [operationType, sourceAccountId, destinationAccountId]);
+  }, []);
 
   useEffect(() => {
     loadAccounts();
   }, [loadAccounts]);
 
+  useEffect(() => {
+    if (!accounts.length) return;
+    const vault = accounts.find((account) => account.system_role_type === 'SYSTEM_CASH_VAULT');
+    const firstCustomer = accounts.find((account) => account.account_type === 'customer');
+
+    if (operationType === 'deposit') {
+      if (vault) setSourceAccountId(vault.id);
+      setDestinationAccountId((current) => current || firstCustomer?.id || '');
+    } else if (operationType === 'withdraw') {
+      setSourceAccountId((current) => current || firstCustomer?.id || '');
+      if (vault) setDestinationAccountId(vault.id);
+    } else if (operationType === 'transfer') {
+      setSourceAccountId((current) => current || firstCustomer?.id || '');
+    }
+  }, [accounts, operationType]);
+
   function handleTypeChange(type) {
     setOperationType(type);
     setResult(null);
     setError(null);
+    setReview(null);
+    setModalError(null);
     setSearchParams({ type });
 
-    const vault = accounts.find((a) => a.system_role_type === 'SYSTEM_CASH_VAULT');
-    const firstCustomer = accounts.find((a) => a.account_type === 'customer');
+    const vault = accounts.find((account) => account.system_role_type === 'SYSTEM_CASH_VAULT');
+    const firstCustomer = accounts.find((account) => account.account_type === 'customer');
 
     if (type === 'deposit') {
       if (vault) setSourceAccountId(vault.id);
-      if (firstCustomer) setDestinationAccountId(firstCustomer.id);
+      setDestinationAccountId(firstCustomer?.id || '');
     } else if (type === 'withdraw') {
-      if (firstCustomer) setSourceAccountId(firstCustomer.id);
-      if (vault) setDestinationAccountId(vault.id);
+      setSourceAccountId(firstCustomer?.id || '');
+      setDestinationAccountId(vault?.id || '');
     } else if (type === 'transfer') {
-      if (firstCustomer) setSourceAccountId(firstCustomer.id);
+      setSourceAccountId(firstCustomer?.id || '');
       setDestinationAccountId('');
     }
   }
 
-  async function handleSubmit(e) {
-    if (e && e.preventDefault) e.preventDefault();
+  function accountLabel(accountId) {
+    if (!accountId) return '—';
+    const account = accounts.find((item) => item.id === accountId);
+    if (!account) return accountId;
+    if (account.system_role_type === 'SYSTEM_CASH_VAULT') {
+      return `${account.account_number} · System cash vault`;
+    }
+    return `${account.account_number} · ${account.account_type} · ${paiseToRupees(account.current_balance)}`;
+  }
+
+  function handleSubmit(e) {
+    e.preventDefault();
     setError(null);
     setResult(null);
+    setModalError(null);
 
     let paiseAmount;
     try {
       paiseAmount = rupeesToPaise(amountRupees);
-    } catch (valErr) {
-      setError(valErr.message);
+    } catch (validationError) {
+      setError(validationError.message);
       return;
     }
 
@@ -119,42 +187,53 @@ export default function Operations() {
     }
 
     const payload = {
-      type: operationType,
+      type: apiTypeFor(operationType),
       amountPaise: paiseAmount,
       sourceAccountId,
       destinationAccountId,
     };
+    const signature = JSON.stringify(payload);
 
+    let keyToUse = idempotencyKey;
+    if (lastAttempt && lastAttempt.signature !== signature) {
+      keyToUse = generateIdempotencyKey();
+      setIdempotencyKey(keyToUse);
+    }
+
+    setReview({ payload, signature, key: keyToUse });
+  }
+
+  async function handleConfirm() {
+    if (!review) return;
     setSubmitting(true);
+    setModalError(null);
+    setError(null);
+
     try {
       const res = await api.executeTransaction({
-        ...payload,
-        idempotencyKey,
+        ...review.payload,
+        idempotencyKey: review.key,
       });
 
-      // Save as last settled transaction
       setLastSettledTx({
-        key: idempotencyKey,
-        payload,
+        key: review.key,
+        payload: review.payload,
         result: res,
       });
-
+      setLastAttempt(null);
       setResult(res);
-
-      // Rotate key for subsequent genuine new operations
       setIdempotencyKey(generateIdempotencyKey());
-
-      // Refresh accounts in background
+      setReview(null);
+      toast.success(`Transaction ${res.transaction_id} settled and posted`);
       loadAccounts();
     } catch (err) {
-      // NOTE: Key is preserved on failure so retrying sends the identical key
-      setError(err.message || 'Transaction failed or was refused by engine');
+      setLastAttempt({ signature: review.signature, key: review.key });
+      setModalError(err.message || 'Transaction failed or was refused by the engine');
     } finally {
       setSubmitting(false);
     }
   }
 
-  // Real Replay Demonstration: Sends a genuine duplicate request to the backend with the same key
   async function handleSimulateRealReplay() {
     if (!lastSettledTx) return;
     setError(null);
@@ -164,7 +243,6 @@ export default function Operations() {
         ...lastSettledTx.payload,
         idempotencyKey: lastSettledTx.key,
       });
-
       setResult(replayRes);
     } catch (err) {
       setError(`Replay test failed: ${err.message}`);
@@ -173,345 +251,409 @@ export default function Operations() {
     }
   }
 
-  function handleCopyKey() {
-    navigator.clipboard.writeText(idempotencyKey);
-    setCopiedKey(true);
-    setTimeout(() => setCopiedKey(false), 2000);
+  async function handleCopyKey() {
+    try {
+      await navigator.clipboard.writeText(idempotencyKey);
+      toast.success('Idempotency key copied');
+    } catch {
+      toast.error('Could not copy idempotency key');
+    }
   }
 
   function handleNewKey() {
     setIdempotencyKey(generateIdempotencyKey());
+    setLastAttempt(null);
     setResult(null);
     setError(null);
+    setModalError(null);
   }
 
-  const customerAccounts = accounts.filter((a) => a.account_type === 'customer');
-  const vaultAccount = accounts.find((a) => a.system_role_type === 'SYSTEM_CASH_VAULT');
+  const customerAccounts = accounts.filter((account) => account.account_type === 'customer');
+  const vaultAccount = accounts.find((account) => account.system_role_type === 'SYSTEM_CASH_VAULT');
+  const meta = operationMeta[operationType] || operationMeta.transfer;
 
   return (
-    <div className="max-w-4xl mx-auto space-y-6 animate-fadeIn">
-      {/* Header */}
-      <div className="pb-6 border-b border-slate-800">
-        <h1 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">
-          Money Movement Engine
-        </h1>
-        <p className="text-slate-400 text-sm mt-1">
-          Execute deposits, withdrawals, and peer transfers with end-to-end idempotency protection.
-        </p>
-      </div>
+    <div className="mx-auto max-w-5xl space-y-6 animate-fadeIn">
+      <PageHeader
+        eyebrow="Money movement"
+        title="Move money"
+        description="Execute deposits, withdrawals, and transfers with idempotent, double-entry settlement."
+        actions={
+          <>
+            <Button variant="secondary" size="sm" onClick={loadAccounts}>
+              <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />
+              Refresh balances
+            </Button>
+            <ButtonLink to="/accounts" variant="secondary" size="sm">
+              <Wallet className="h-3.5 w-3.5" aria-hidden="true" />
+              Accounts
+            </ButtonLink>
+          </>
+        }
+      />
 
       {error && <Alert type="error" message={error} onClose={() => setError(null)} />}
 
-      {/* Operation Type Switcher */}
-      <div className="grid grid-cols-3 gap-3">
-        <button
-          type="button"
-          onClick={() => handleTypeChange('deposit')}
-          className={`p-4 rounded-2xl border text-left transition-all flex items-center gap-3 ${
-            operationType === 'deposit'
-              ? 'bg-emerald-950/40 border-emerald-500/50 shadow-lg shadow-emerald-500/10'
-              : 'bg-slate-900 border-slate-800 hover:border-slate-700'
-          }`}
-        >
-          <div
-            className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${
-              operationType === 'deposit'
-                ? 'bg-emerald-500 text-white'
-                : 'bg-emerald-500/10 text-emerald-400'
-            }`}
-          >
-            <ArrowDownLeft className="w-5 h-5" />
-          </div>
-          <div>
-            <div className="text-sm font-bold text-white">Deposit</div>
-            <div className="text-xs text-slate-400">Vault &rarr; Account</div>
-          </div>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => handleTypeChange('withdraw')}
-          className={`p-4 rounded-2xl border text-left transition-all flex items-center gap-3 ${
-            operationType === 'withdraw'
-              ? 'bg-amber-950/40 border-amber-500/50 shadow-lg shadow-amber-500/10'
-              : 'bg-slate-900 border-slate-800 hover:border-slate-700'
-          }`}
-        >
-          <div
-            className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${
-              operationType === 'withdraw'
-                ? 'bg-amber-500 text-white'
-                : 'bg-amber-500/10 text-amber-400'
-            }`}
-          >
-            <ArrowUpRight className="w-5 h-5" />
-          </div>
-          <div>
-            <div className="text-sm font-bold text-white">Withdraw</div>
-            <div className="text-xs text-slate-400">Account &rarr; Vault</div>
-          </div>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => handleTypeChange('transfer')}
-          className={`p-4 rounded-2xl border text-left transition-all flex items-center gap-3 ${
-            operationType === 'transfer'
-              ? 'bg-teal-950/40 border-teal-500/50 shadow-lg shadow-teal-500/10'
-              : 'bg-slate-900 border-slate-800 hover:border-slate-700'
-          }`}
-        >
-          <div
-            className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${
-              operationType === 'transfer'
-                ? 'bg-teal-500 text-white'
-                : 'bg-teal-500/10 text-teal-400'
-            }`}
-          >
-            <ArrowLeftRight className="w-5 h-5" />
-          </div>
-          <div>
-            <div className="text-sm font-bold text-white">Transfer</div>
-            <div className="text-xs text-slate-400">Account &rarr; Account</div>
-          </div>
-        </button>
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+        {Object.entries(operationMeta).map(([type, item]) => {
+          const Icon = item.icon;
+          const selected = operationType === type;
+          return (
+            <button
+              key={type}
+              type="button"
+              aria-pressed={selected}
+              onClick={() => handleTypeChange(type)}
+              className={`flex items-center gap-3 rounded-xl border p-3 text-left transition-all ${
+                selected ? item.activeClass : 'border-line bg-surface hover:border-brand/30 hover:bg-slate-50'
+              }`}
+            >
+              <span
+                className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg ${
+                  selected ? item.iconClass : 'bg-slate-100 text-slate-500'
+                }`}
+              >
+                <Icon className="h-5 w-5" aria-hidden="true" />
+              </span>
+              <span>
+                <span className="block text-sm font-semibold text-ink">{item.label}</span>
+                <span className="block text-[11px] text-muted">{item.description}</span>
+              </span>
+            </button>
+          );
+        })}
       </div>
 
-      {/* Main Form & Idempotency Details */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <form
-          onSubmit={handleSubmit}
-          className="lg:col-span-2 bg-slate-900 border border-slate-800 rounded-2xl p-6 sm:p-8 shadow-xl space-y-6"
-        >
-          {/* Source Account */}
-          <div>
-            <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">
-              Source (Debit Account)
-            </label>
-            {operationType === 'deposit' ? (
-              <div className="bg-slate-950 border border-slate-800 rounded-xl p-3 text-sm font-mono text-slate-300 flex items-center justify-between">
-                <span>System Cash Vault</span>
-                <span className="text-xs text-slate-500">{vaultAccount?.id}</span>
-              </div>
-            ) : (
-              <select
-                value={sourceAccountId}
-                onChange={(e) => setSourceAccountId(e.target.value)}
-                required
-                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-teal-500 font-mono"
-              >
-                <option value="">Select source account...</option>
-                {customerAccounts.map((acc) => (
-                  <option key={acc.id} value={acc.id}>
-                    {acc.account_number} — Balance: {paiseToRupees(acc.current_balance)} (
-                    {acc.status})
-                  </option>
-                ))}
-              </select>
-            )}
-          </div>
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1.55fr_1fr]">
+        <Card>
+          <CardHeader>
+            <div>
+              <h2 className="text-sm font-semibold text-ink">{meta.label} details</h2>
+              <p className="mt-0.5 text-xs text-muted">
+                Amounts settle in integer paise with a balanced debit and credit.
+              </p>
+            </div>
+            <Badge variant={meta.tone} className="uppercase">
+              {meta.label}
+            </Badge>
+          </CardHeader>
 
-          {/* Destination Account */}
-          <div>
-            <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">
-              Destination (Credit Account)
-            </label>
-            {operationType === 'withdraw' ? (
-              <div className="bg-slate-950 border border-slate-800 rounded-xl p-3 text-sm font-mono text-slate-300 flex items-center justify-between">
-                <span>System Cash Vault</span>
-                <span className="text-xs text-slate-500">{vaultAccount?.id}</span>
-              </div>
-            ) : (
-              <div className="space-y-2">
-                <select
-                  value={destinationAccountId}
-                  onChange={(e) => setDestinationAccountId(e.target.value)}
-                  required
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-teal-500 font-mono"
-                >
-                  <option value="">Select destination account...</option>
-                  {customerAccounts
-                    .filter((a) => a.id !== sourceAccountId)
-                    .map((acc) => (
-                      <option key={acc.id} value={acc.id}>
-                        {acc.account_number} — Balance: {paiseToRupees(acc.current_balance)}
+          <CardBody>
+            <form onSubmit={handleSubmit} className="space-y-5">
+              <Field label="Source · debit account" htmlFor="source-account" required>
+                {operationType === 'deposit' ? (
+                  <div className="flex items-center justify-between gap-3 rounded-lg border border-line bg-slate-50 px-3 py-2.5 text-sm">
+                    <span className="flex min-w-0 items-center gap-2">
+                      <Building className="h-4 w-4 shrink-0 text-accent" aria-hidden="true" />
+                      <span className="truncate font-medium text-ink">System cash vault</span>
+                    </span>
+                    <span className="truncate font-mono text-[10px] text-muted">
+                      {vaultAccount?.account_number || 'unavailable'}
+                    </span>
+                  </div>
+                ) : (
+                  <Select
+                    id="source-account"
+                    value={sourceAccountId}
+                    onChange={(event) => setSourceAccountId(event.target.value)}
+                  >
+                    <option value="">Select source account…</option>
+                    {customerAccounts.map((account) => (
+                      <option key={account.id} value={account.id}>
+                        {account.account_number} · {paiseToRupees(account.current_balance)} · {account.status}
                       </option>
                     ))}
-                </select>
-                {operationType === 'transfer' && (
-                  <input
-                    type="text"
-                    value={destinationAccountId}
-                    onChange={(e) => setDestinationAccountId(e.target.value)}
-                    placeholder="Or enter recipient Account UUID directly..."
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2 text-xs text-slate-300 placeholder-slate-600 focus:outline-none focus:border-teal-500 font-mono"
-                  />
+                  </Select>
                 )}
-              </div>
-            )}
-          </div>
+              </Field>
 
-          {/* Amount in Rupees */}
-          <div>
-            <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">
-              Amount (INR ₹)
-            </label>
-            <div className="relative">
-              <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 font-bold text-lg">
-                ₹
-              </span>
-              <input
-                type="text"
-                value={amountRupees}
-                onChange={(e) => setAmountRupees(e.target.value)}
-                placeholder="100.00"
+              <Field label="Destination · credit account" htmlFor="destination-account" required>
+                {operationType === 'withdraw' ? (
+                  <div className="flex items-center justify-between gap-3 rounded-lg border border-line bg-slate-50 px-3 py-2.5 text-sm">
+                    <span className="flex min-w-0 items-center gap-2">
+                      <Building className="h-4 w-4 shrink-0 text-accent" aria-hidden="true" />
+                      <span className="truncate font-medium text-ink">System cash vault</span>
+                    </span>
+                    <span className="truncate font-mono text-[10px] text-muted">
+                      {vaultAccount?.account_number || 'unavailable'}
+                    </span>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    <Select
+                      id="destination-account"
+                      value={destinationAccountId}
+                      onChange={(event) => setDestinationAccountId(event.target.value)}
+                    >
+                      <option value="">Select destination account…</option>
+                      {customerAccounts
+                        .filter((account) => account.id !== sourceAccountId)
+                        .map((account) => (
+                          <option key={account.id} value={account.id}>
+                            {account.account_number} · {paiseToRupees(account.current_balance)}
+                          </option>
+                        ))}
+                    </Select>
+                    {operationType === 'transfer' && (
+                      <Input
+                        type="text"
+                        value={destinationAccountId}
+                        onChange={(event) => setDestinationAccountId(event.target.value)}
+                        placeholder="Or enter recipient account UUID directly…"
+                        className="font-mono text-xs"
+                        aria-label="Recipient account UUID"
+                      />
+                    )}
+                  </div>
+                )}
+              </Field>
+
+              <Field
+                label="Amount"
+                htmlFor="operation-amount"
+                hint="Settles internally in integer minor currency (paise). No floating-point rounding."
                 required
-                className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-9 pr-4 py-3 text-lg font-mono font-bold text-white placeholder-slate-600 focus:outline-none focus:border-teal-500"
-              />
+              >
+                <InputPrefix prefix="₹">
+                  <Input
+                    id="operation-amount"
+                    type="text"
+                    inputMode="decimal"
+                    value={amountRupees}
+                    onChange={(event) => setAmountRupees(event.target.value)}
+                    placeholder="100.00"
+                    className="h-11 font-mono text-base font-semibold"
+                    required
+                  />
+                </InputPrefix>
+              </Field>
+
+              {operationType !== 'transfer' && !vaultAccount && (
+                <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-warning-soft/60 p-3 text-xs text-amber-900">
+                  <Info className="mt-0.5 h-4 w-4 shrink-0 text-warning" aria-hidden="true" />
+                  <p>System cash vault is unavailable for this session, so this operation cannot settle.</p>
+                </div>
+              )}
+
+              <div className="rounded-lg border border-line bg-slate-50 p-3">
+                <div className="flex items-start gap-2 text-xs text-muted">
+                  <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-brand" aria-hidden="true" />
+                  <p className="leading-relaxed">
+                    Review the operation before settlement. A successful request posts a balanced debit and
+                    credit and rotates the idempotency key.
+                  </p>
+                </div>
+              </div>
+
+              <Button type="submit" size="lg" className="w-full" disabled={submitting || replaying}>
+                <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
+                Review {meta.label.toLowerCase()}
+              </Button>
+            </form>
+          </CardBody>
+        </Card>
+
+        <Card className="flex flex-col">
+          <CardHeader>
+            <div>
+              <h2 className="flex items-center gap-2 text-sm font-semibold text-ink">
+                <ShieldCheck className="h-4 w-4 text-brand" aria-hidden="true" />
+                Idempotency
+              </h2>
+              <p className="mt-0.5 text-xs text-muted">Safe retries without duplicate debits.</p>
             </div>
-            <p className="text-[11px] text-slate-400 mt-1 flex items-center gap-1">
-              <Info className="w-3.5 h-3.5 text-teal-400" />
-              Settles internally in integer minor currency (paise). Zero floating-point rounding.
-            </p>
-          </div>
+          </CardHeader>
 
-          {/* Submit Action */}
-          <button
-            type="submit"
-            disabled={submitting || replaying}
-            className="w-full py-3.5 px-4 rounded-xl font-bold text-sm text-white bg-gradient-to-r from-teal-500 to-teal-600 hover:from-teal-600 hover:to-teal-700 active:scale-[0.99] disabled:opacity-50 transition-all shadow-lg shadow-teal-500/20 flex items-center justify-center gap-2"
-          >
-            {submitting ? (
-              <>
-                <RefreshCw className="w-4 h-4 animate-spin" />
-                Settling Double-Entry Ledger...
-              </>
-            ) : error ? (
-              <>
-                <RotateCcw className="w-4 h-4" />
-                Retry Operation (Same Idempotency Key)
-              </>
-            ) : (
-              `Execute ${operationType.toUpperCase()}`
-            )}
-          </button>
-        </form>
-
-        {/* Idempotency & Replay Panel */}
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-4 flex flex-col justify-between">
-          <div>
-            <div className="flex items-center gap-2 text-teal-400 font-bold text-sm mb-2">
-              <ShieldCheck className="w-4 h-4" />
-              Idempotency Invariant
-            </div>
-            <p className="text-xs text-slate-400 leading-relaxed mb-4">
-              Every financial mutation requires a unique client-generated UUID key. Repeating a request
-              with the same key returns the exact cached response without double debit.
+          <CardBody className="flex flex-1 flex-col gap-4">
+            <p className="text-xs leading-relaxed text-muted">
+              Every financial mutation requires a unique client-generated UUID key. Repeating a request with
+              the same key returns the exact cached response without double debit.
             </p>
 
-            <div className="bg-slate-950 border border-slate-800 rounded-xl p-3 space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="text-[10px] uppercase font-bold tracking-wider text-slate-500">
-                  Active Request Key
+            <div className="rounded-lg border border-line bg-slate-50 p-3">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[10px] font-semibold uppercase tracking-widest text-muted">
+                  Active request key
                 </span>
                 <button
                   type="button"
                   onClick={handleCopyKey}
-                  className="text-xs text-teal-400 hover:text-teal-300 flex items-center gap-1"
+                  className="inline-flex items-center gap-1 text-[11px] font-semibold text-brand hover:underline"
                 >
-                  <Copy className="w-3 h-3" />
-                  {copiedKey ? 'Copied' : 'Copy'}
+                  <Copy className="h-3 w-3" aria-hidden="true" />
+                  Copy
                 </button>
               </div>
-              <div className="text-xs font-mono text-slate-300 break-all">{idempotencyKey}</div>
+              <div className="mt-1.5 break-all font-mono text-[11px] text-ink-soft">{idempotencyKey}</div>
             </div>
-          </div>
 
-          <div className="space-y-3 pt-4 border-t border-slate-800">
-            <button
-              type="button"
-              onClick={handleNewKey}
-              className="w-full py-2 px-3 bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-300 rounded-xl transition-colors flex items-center justify-center gap-1.5"
-            >
-              <RotateCcw className="w-3.5 h-3.5" />
-              Generate Fresh Key
-            </button>
+            <div className="mt-auto space-y-2 border-t border-line pt-4">
+              <Button variant="secondary" size="sm" className="w-full" onClick={handleNewKey}>
+                <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />
+                Generate fresh key
+              </Button>
 
-            {lastSettledTx && (
-              <button
-                type="button"
-                onClick={handleSimulateRealReplay}
-                disabled={replaying || submitting}
-                className="w-full py-2 px-3 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-xs font-semibold text-amber-300 rounded-xl transition-colors flex items-center justify-center gap-1.5 disabled:opacity-50"
-              >
-                <Repeat className={`w-3.5 h-3.5 ${replaying ? 'animate-spin' : ''}`} />
-                {replaying ? 'Sending Replay...' : 'Send Live Replay (Same Key)'}
-              </button>
-            )}
+              {lastSettledTx && (
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  className="w-full border-amber-200 bg-warning-soft/60 text-amber-800 hover:bg-warning-soft"
+                  onClick={handleSimulateRealReplay}
+                  disabled={replaying || submitting}
+                  loading={replaying}
+                >
+                  <Repeat className="h-3.5 w-3.5" aria-hidden="true" />
+                  {replaying ? 'Sending replay…' : 'Send live replay (same key)'}
+                </Button>
+              )}
 
-            <p className="text-[10px] text-slate-500 text-center">
-              Replays transmit genuine duplicate HTTP requests to test server idempotency resolution.
-            </p>
-          </div>
-        </div>
+              <p className="text-center text-[10px] leading-relaxed text-slate-400">
+                Replays transmit genuine duplicate HTTP requests to test server idempotency resolution.
+              </p>
+            </div>
+          </CardBody>
+        </Card>
       </div>
 
-      {/* Transaction Result Modal / Card */}
       {result && (
-        <div className="bg-slate-900 border border-teal-500/40 rounded-2xl p-6 sm:p-8 shadow-2xl space-y-4 animate-scaleIn">
-          <div className="flex items-start justify-between">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-teal-500/20 text-teal-400 flex items-center justify-center">
-                <CheckCircle2 className="w-6 h-6" />
+        <Card className="border-emerald-200">
+          <CardBody className="space-y-4">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div className="flex items-start gap-3">
+                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-success-soft text-success">
+                  <CheckCircle2 className="h-5 w-5" aria-hidden="true" />
+                </span>
+                <div className="min-w-0">
+                  <h2 className="text-base font-semibold text-ink">
+                    {result.status === 'success' ? 'Transaction settled and posted' : 'Transaction processed'}
+                  </h2>
+                  <p className="mt-0.5 truncate font-mono text-[11px] text-muted">
+                    {result.transaction_id || result.id}
+                  </p>
+                </div>
+              </div>
+
+              {result.isIdempotentReplay && (
+                <Badge variant="warning" className="uppercase">
+                  Idempotent replay confirmed
+                </Badge>
+              )}
+            </div>
+
+            <dl className="grid grid-cols-2 gap-4 border-y border-line py-4 text-xs sm:grid-cols-4">
+              <div>
+                <dt className="text-muted">Status</dt>
+                <dd className="mt-1 font-semibold capitalize text-ink">{result.status}</dd>
               </div>
               <div>
-                <h3 className="text-lg font-bold text-white">
-                  Transaction {result.status === 'success' ? 'Settled & Posted' : 'Processed'}
-                </h3>
-                <span className="text-xs font-mono text-teal-400">
-                  ID: {result.transaction_id || result.id}
-                </span>
+                <dt className="text-muted">Amount</dt>
+                <dd className="mt-1 font-semibold text-success tabular-nums">
+                  {paiseToRupees(result.amount_paise)}
+                </dd>
               </div>
-            </div>
+              <div>
+                <dt className="text-muted">Type</dt>
+                <dd className="mt-1 font-semibold text-ink">{labelForType(result.type)}</dd>
+              </div>
+              <div>
+                <dt className="text-muted">Posted at</dt>
+                <dd className="mt-1 font-semibold text-ink">{formatTimestamp(result.posted_at)}</dd>
+              </div>
+            </dl>
 
-            {result.isIdempotentReplay && (
-              <span className="px-3 py-1 rounded-full text-xs font-bold font-mono uppercase bg-amber-500/15 text-amber-400 border border-amber-500/30">
-                Idempotent Replay Confirmed
-              </span>
-            )}
-          </div>
-
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 py-4 border-y border-slate-800 font-mono text-xs">
-            <div>
-              <span className="text-slate-500 block">Status:</span>
-              <span className="text-white font-bold capitalize">{result.status}</span>
+            <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-end">
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => {
+                  setResult(null);
+                  setAmountRupees('');
+                }}
+              >
+                Start another
+              </Button>
+              <ButtonLink to={`/transactions/${result.transaction_id || result.id}`} size="sm">
+                <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
+                View ledger postings
+              </ButtonLink>
             </div>
-            <div>
-              <span className="text-slate-500 block">Settled Amount:</span>
-              <span className="text-emerald-400 font-bold">
-                {paiseToRupees(result.amount_paise)}
-              </span>
-            </div>
-            <div>
-              <span className="text-slate-500 block">Currency:</span>
-              <span className="text-white">{result.currency || 'INR'}</span>
-            </div>
-            <div>
-              <span className="text-slate-500 block">Postings Generated:</span>
-              <span className="text-teal-400 font-bold">2 (Balanced Double-Entry)</span>
-            </div>
-          </div>
-
-          <div className="flex justify-end gap-3 pt-2">
-            <Link
-              to={`/transactions/${result.transaction_id || result.id}`}
-              className="px-4 py-2 bg-teal-500 hover:bg-teal-600 text-white rounded-xl text-xs font-bold transition-colors flex items-center gap-1.5"
-            >
-              View Double-Entry Ledger Postings <ExternalLink className="w-3.5 h-3.5" />
-            </Link>
-          </div>
-        </div>
+          </CardBody>
+        </Card>
       )}
+
+      <Modal
+        isOpen={!!review}
+        onClose={() => {
+          if (!submitting) {
+            setReview(null);
+            setModalError(null);
+          }
+        }}
+        title={review ? `Review ${meta.label.toLowerCase()}` : 'Review operation'}
+        size="md"
+        footer={
+          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-end">
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                setReview(null);
+                setModalError(null);
+              }}
+              disabled={submitting}
+            >
+              Cancel
+            </Button>
+            <Button type="button" size="sm" onClick={handleConfirm} loading={submitting}>
+              {submitting ? 'Settling…' : modalError ? 'Retry with same key' : 'Confirm & settle'}
+            </Button>
+          </div>
+        }
+      >
+        {review && (
+          <div className="space-y-4">
+            {modalError && <Alert type="error" message={modalError} />}
+
+            <dl className="divide-y divide-line rounded-lg border border-line">
+              <div className="flex items-center justify-between gap-4 px-3 py-2.5 text-xs">
+                <dt className="text-muted">Operation</dt>
+                <dd className="font-semibold text-ink">{labelForType(review.payload.type)}</dd>
+              </div>
+              <div className="flex items-center justify-between gap-4 px-3 py-2.5 text-xs">
+                <dt className="text-muted">Amount</dt>
+                <dd className="font-semibold text-ink tabular-nums">
+                  {paiseToRupees(review.payload.amountPaise)}
+                </dd>
+              </div>
+              <div className="flex items-start justify-between gap-4 px-3 py-2.5 text-xs">
+                <dt className="shrink-0 text-muted">From</dt>
+                <dd className="min-w-0 break-all text-right font-mono text-[10px] text-ink-soft">
+                  {accountLabel(review.payload.sourceAccountId)}
+                </dd>
+              </div>
+              <div className="flex items-start justify-between gap-4 px-3 py-2.5 text-xs">
+                <dt className="shrink-0 text-muted">To</dt>
+                <dd className="min-w-0 break-all text-right font-mono text-[10px] text-ink-soft">
+                  {accountLabel(review.payload.destinationAccountId)}
+                </dd>
+              </div>
+              <div className="flex items-start justify-between gap-4 px-3 py-2.5 text-xs">
+                <dt className="shrink-0 text-muted">Idempotency key</dt>
+                <dd className="min-w-0 break-all text-right font-mono text-[10px] text-muted">{review.key}</dd>
+              </div>
+            </dl>
+
+            <div className="flex items-start gap-2 rounded-lg border border-line bg-slate-50 p-3 text-xs text-muted">
+              <Info className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" aria-hidden="true" />
+              <p className="leading-relaxed">
+                Confirming sends a single idempotent request. If the response is lost, retrying with the same
+                key returns the original result without a second debit.
+              </p>
+            </div>
+          </div>
+        )}
+      </Modal>
     </div>
   );
 }

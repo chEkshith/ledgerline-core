@@ -1,6 +1,8 @@
 import React from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { ShieldAlert } from 'lucide-react';
+import { ButtonLink, Card, EmptyState } from './ui';
 
 export default function ProtectedRoute({ children, allowedRoles }) {
   const { isAuthenticated, user } = useAuth();
@@ -12,13 +14,19 @@ export default function ProtectedRoute({ children, allowedRoles }) {
 
   if (allowedRoles && !allowedRoles.includes(user?.role)) {
     return (
-      <div className="max-w-3xl mx-auto mt-16 p-8 bg-slate-900 border border-red-500/30 rounded-xl text-center">
-        <h2 className="text-xl font-bold text-red-400 mb-2">Access Restricted</h2>
-        <p className="text-slate-400 text-sm mb-6">
-          Your current role (<code className="text-amber-400 font-mono">{user?.role}</code>) does not
-          possess sufficient privileges to view this section.
-        </p>
-        <Navigate to="/" replace />
+      <div className="mx-auto max-w-2xl py-10 animate-fadeIn">
+        <Card>
+          <EmptyState
+            icon={ShieldAlert}
+            title="Access restricted"
+            description={`Your current role (${user?.role || 'unknown'}) does not have permission to view this section.`}
+            action={
+              <ButtonLink to="/dashboard" variant="secondary" size="sm">
+                Back to dashboard
+              </ButtonLink>
+            }
+          />
+        </Card>
       </div>
     );
   }

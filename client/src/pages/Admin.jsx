@@ -1,209 +1,370 @@
 import React, { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import * as api from '../services/api';
-import { ShieldCheck, UserX, UserCheck, RotateCcw, AlertTriangle, ArrowRight } from 'lucide-react';
+import {
+  ShieldCheck,
+  UserX,
+  UserCheck,
+  RotateCcw,
+  AlertTriangle,
+  ExternalLink,
+  Lock,
+  ScrollText,
+  Fingerprint,
+} from 'lucide-react';
 import Alert from '../components/Alert';
+import {
+  Badge,
+  Button,
+  Card,
+  CardBody,
+  CardFooter,
+  CardHeader,
+  ConfirmDialog,
+  Field,
+  Input,
+  PageHeader,
+  Select,
+  useToast,
+} from '../components/ui';
+import { transitionReversalState } from '../utils/formatters';
 
 export default function Admin() {
   const { user } = useAuth();
+  const toast = useToast();
 
-  // User status state
   const [targetUserId, setTargetUserId] = useState('');
   const [targetStatus, setTargetStatus] = useState('false');
   const [statusReason, setStatusReason] = useState('');
   const [userStatusLoading, setUserStatusLoading] = useState(false);
+  const [pendingUserStatus, setPendingUserStatus] = useState(null);
 
-  // Reversal lookup state
   const [reverseTxId, setReverseTxId] = useState('');
   const [reverseReason, setReverseReason] = useState('');
   const [reversalLoading, setReversalLoading] = useState(false);
+  const [lastReversal, setLastReversal] = useState(null);
+  const [reversalOp, setReversalOp] = useState(() =>
+    transitionReversalState(null, { type: 'INIT', txId: '' })
+  );
 
   const [error, setError] = useState(null);
-  const [success, setSuccess] = useState(null);
 
-  async function handleUserStatus(e) {
+  function handleUserStatus(e) {
     e.preventDefault();
     if (!targetUserId.trim() || !statusReason.trim()) {
-      setError('Target User UUID and Reason are required');
+      setError('Target user UUID and reason are required');
       return;
     }
+    setError(null);
+    setPendingUserStatus({
+      userId: targetUserId.trim(),
+      isActive: targetStatus === 'true',
+      reason: statusReason.trim(),
+    });
+  }
 
+  async function applyUserStatus() {
+    if (!pendingUserStatus) return;
     setUserStatusLoading(true);
     setError(null);
-    setSuccess(null);
     try {
-      const isActive = targetStatus === 'true';
-      await api.setUserStatus(targetUserId.trim(), isActive, statusReason.trim());
-      setSuccess(`User status updated to ${isActive ? 'ACTIVE' : 'SUSPENDED'} and attributed in audit log.`);
+      await api.setUserStatus(pendingUserStatus.userId, pendingUserStatus.isActive, pendingUserStatus.reason);
+      toast.success(
+        `User ${pendingUserStatus.isActive ? 'activated' : 'suspended'} and recorded in the audit log`
+      );
       setTargetUserId('');
       setStatusReason('');
+      setPendingUserStatus(null);
     } catch (err) {
       setError(err.message || 'Failed to update user status');
+      setPendingUserStatus(null);
     } finally {
       setUserStatusLoading(false);
     }
   }
 
+  function handleTxIdChange(value) {
+    setReverseTxId(value);
+    setReversalOp((prev) => transitionReversalState(prev, { type: 'CHANGE_TX_ID', txId: value.trim() }));
+  }
+
+  function handleReasonChange(value) {
+    setReverseReason(value);
+    setReversalOp((prev) => transitionReversalState(prev, { type: 'CHANGE_REASON', reason: value }));
+  }
+
   async function handleReversal(e) {
     e.preventDefault();
     if (!reverseTxId.trim() || !reverseReason.trim()) {
-      setError('Transaction ID and Reason are required');
+      setError('Transaction ID and reason are required');
       return;
     }
 
     setReversalLoading(true);
     setError(null);
-    setSuccess(null);
+    setLastReversal(null);
     try {
       const res = await api.reverseTransaction(reverseTxId.trim(), {
         reason: reverseReason.trim(),
+        idempotencyKey: reversalOp.idempotencyKey,
       });
-      setSuccess(`Reversal successfully executed. Reversal Transaction ID: ${res.transaction_id || res.id}`);
+      toast.success(`Reversal executed. Compensating transaction: ${res.transaction_id || res.id}`);
+      setLastReversal(res);
       setReverseTxId('');
       setReverseReason('');
+      setReversalOp(transitionReversalState(null, { type: 'INIT', txId: '' }));
     } catch (err) {
+      setReversalOp((prev) =>
+        transitionReversalState(prev, {
+          type: 'SUBMIT_FAILURE',
+          payload: { reason: reverseReason.trim() },
+        })
+      );
       setError(err.message || 'Reversal execution failed');
     } finally {
       setReversalLoading(false);
     }
   }
 
+  const suspension = pendingUserStatus && !pendingUserStatus.isActive;
+
   return (
-    <div className="max-w-4xl mx-auto space-y-8 animate-fadeIn">
-      {/* Top Banner */}
-      <div className="pb-6 border-b border-slate-800">
-        <div className="flex items-center gap-2 text-amber-400 font-mono text-xs uppercase tracking-wider font-bold mb-1">
-          <ShieldCheck className="w-4 h-4" />
-          Restricted Administrative Console
-        </div>
-        <h1 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">
-          System Governance & Reversals
-        </h1>
-        <p className="text-slate-400 text-sm mt-1">
-          Perform authorized user lifecycle adjustments and compensating ledger reversals under verified admin identity.
-        </p>
-      </div>
+    <div className="mx-auto max-w-5xl space-y-6 animate-fadeIn">
+      <PageHeader
+        eyebrow="Restricted console"
+        title="System governance"
+        description="Authorized user lifecycle adjustments and compensating ledger reversals under a verified admin identity."
+        actions={
+          <Badge variant="warning" className="uppercase">
+            <ShieldCheck className="h-3.5 w-3.5" aria-hidden="true" />
+            Admin only
+          </Badge>
+        }
+      />
 
       {error && <Alert type="error" message={error} onClose={() => setError(null)} />}
-      {success && <Alert type="success" message={success} onClose={() => setSuccess(null)} />}
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        {/* User Lifecycle Management Card */}
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-5">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-indigo-500/10 text-indigo-400 flex items-center justify-center">
-              <UserX className="w-5 h-5" />
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+        <Card>
+          <CardHeader>
+            <div className="flex items-center gap-3">
+              <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-accent-soft text-accent">
+                <UserX className="h-5 w-5" aria-hidden="true" />
+              </span>
+              <div>
+                <h2 className="text-sm font-semibold text-ink">Modify user status</h2>
+                <p className="mt-0.5 text-xs text-muted">Suspend or restore database authentication.</p>
+              </div>
             </div>
-            <div>
-              <h2 className="text-base font-bold text-white">Modify User Status</h2>
-              <p className="text-xs text-slate-400">Suspends or restores user database authentication</p>
-            </div>
-          </div>
+          </CardHeader>
 
-          <form onSubmit={handleUserStatus} className="space-y-4">
-            <div>
-              <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">
-                Target User UUID
-              </label>
-              <input
-                type="text"
-                value={targetUserId}
-                onChange={(e) => setTargetUserId(e.target.value)}
-                placeholder="00000000-0000-0000-0000-000000000000"
-                required
-                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-teal-500 font-mono"
-              />
-            </div>
+          <CardBody>
+            <form onSubmit={handleUserStatus} className="space-y-4">
+              <Field label="Target user UUID" htmlFor="admin-user-id" required>
+                <Input
+                  id="admin-user-id"
+                  type="text"
+                  value={targetUserId}
+                  onChange={(event) => setTargetUserId(event.target.value)}
+                  placeholder="00000000-0000-0000-0000-000000000000"
+                  className="font-mono text-xs"
+                  required
+                />
+              </Field>
 
-            <div>
-              <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">
-                Desired Active Status
-              </label>
-              <select
-                value={targetStatus}
-                onChange={(e) => setTargetStatus(e.target.value)}
-                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-xs text-white focus:outline-none focus:border-teal-500"
+              <Field label="Desired active status" htmlFor="admin-user-status" required>
+                <Select
+                  id="admin-user-status"
+                  value={targetStatus}
+                  onChange={(event) => setTargetStatus(event.target.value)}
+                >
+                  <option value="false">Suspend user · is_active = false</option>
+                  <option value="true">Activate user · is_active = true</option>
+                </Select>
+              </Field>
+
+              <Field label="Audit reason" htmlFor="admin-user-reason" hint="Attributed to your admin identity." required>
+                <Input
+                  id="admin-user-reason"
+                  type="text"
+                  value={statusReason}
+                  onChange={(event) => setStatusReason(event.target.value)}
+                  placeholder="e.g. Velocity alert triggered, compliance hold"
+                  required
+                />
+              </Field>
+
+              <Button
+                type="submit"
+                className="w-full"
+                variant={targetStatus === 'true' ? 'success' : 'danger'}
+                loading={userStatusLoading}
               >
-                <option value="false">Suspend User (is_active = FALSE)</option>
-                <option value="true">Activate User (is_active = TRUE)</option>
-              </select>
-            </div>
+                {targetStatus === 'true' ? (
+                  <UserCheck className="h-4 w-4" aria-hidden="true" />
+                ) : (
+                  <UserX className="h-4 w-4" aria-hidden="true" />
+                )}
+                {targetStatus === 'true' ? 'Activate user' : 'Suspend user'}
+              </Button>
+            </form>
+          </CardBody>
 
-            <div>
-              <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">
-                Audit Reason
-              </label>
-              <input
-                type="text"
-                value={statusReason}
-                onChange={(e) => setStatusReason(e.target.value)}
-                placeholder="e.g. Velocity alert triggered, compliance hold"
+          <CardFooter>
+            <p className="text-[11px] text-muted">
+              Suspension blocks authentication immediately. Re-activation restores access without changing roles.
+            </p>
+          </CardFooter>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <div className="flex items-center gap-3">
+              <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-danger-soft text-danger">
+                <RotateCcw className="h-5 w-5" aria-hidden="true" />
+              </span>
+              <div>
+                <h2 className="text-sm font-semibold text-ink">Reverse transaction</h2>
+                <p className="mt-0.5 text-xs text-muted">Generate compensating ledger postings.</p>
+              </div>
+            </div>
+          </CardHeader>
+
+          <CardBody>
+            <form onSubmit={handleReversal} className="space-y-4">
+              <Field label="Original transaction UUID" htmlFor="admin-tx-id" required>
+                <Input
+                  id="admin-tx-id"
+                  type="text"
+                  value={reverseTxId}
+                  onChange={(event) => handleTxIdChange(event.target.value)}
+                  placeholder="00000000-0000-0000-0000-000000000000"
+                  className="font-mono text-xs"
+                  required
+                />
+              </Field>
+
+              <Field
+                label="Reversal justification"
+                htmlFor="admin-tx-reason"
+                hint="Changing the reason after a failure starts a new operation with a fresh key."
                 required
-                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-teal-500"
-              />
-            </div>
+              >
+                <Input
+                  id="admin-tx-reason"
+                  type="text"
+                  value={reverseReason}
+                  onChange={(event) => handleReasonChange(event.target.value)}
+                  placeholder="e.g. Erroneous payment, disputed transaction"
+                  required
+                />
+              </Field>
 
-            <button
-              type="submit"
-              disabled={userStatusLoading}
-              className="w-full py-2.5 px-4 rounded-xl text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 transition-colors"
-            >
-              {userStatusLoading ? 'Applying...' : 'Apply Status Change'}
-            </button>
-          </form>
-        </div>
+              <div className="rounded-lg border border-line bg-slate-50 p-3">
+                <div className="text-[10px] font-semibold uppercase tracking-widest text-muted">
+                  Assigned idempotency key · preserved on retry
+                </div>
+                <div className="mt-1 break-all font-mono text-[10px] font-semibold text-brand">
+                  {reversalOp.idempotencyKey}
+                </div>
+              </div>
 
-        {/* Ledger Reversal Card */}
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-5">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-rose-500/10 text-rose-400 flex items-center justify-center">
-              <RotateCcw className="w-5 h-5" />
-            </div>
-            <div>
-              <h2 className="text-base font-bold text-white">Reverse Transaction</h2>
-              <p className="text-xs text-slate-400">Generates compensating ledger postings</p>
-            </div>
-          </div>
+              <Button type="submit" className="w-full" variant="danger" loading={reversalLoading}>
+                <RotateCcw className="h-4 w-4" aria-hidden="true" />
+                {reversalLoading ? 'Executing reversal…' : 'Execute ledger reversal'}
+              </Button>
+            </form>
+          </CardBody>
 
-          <form onSubmit={handleReversal} className="space-y-4">
-            <div>
-              <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">
-                Original Transaction UUID
-              </label>
-              <input
-                type="text"
-                value={reverseTxId}
-                onChange={(e) => setReverseTxId(e.target.value)}
-                placeholder="00000000-0000-0000-0000-000000000000"
-                required
-                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-teal-500 font-mono"
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">
-                Reversal Justification
-              </label>
-              <input
-                type="text"
-                value={reverseReason}
-                onChange={(e) => setReverseReason(e.target.value)}
-                placeholder="e.g. Erroneous payment, disputed transaction"
-                required
-                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-teal-500"
-              />
-            </div>
-
-            <button
-              type="submit"
-              disabled={reversalLoading}
-              className="w-full py-2.5 px-4 rounded-xl text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 disabled:opacity-50 transition-colors"
-            >
-              {reversalLoading ? 'Processing Reversal...' : 'Execute Ledger Reversal'}
-            </button>
-          </form>
-        </div>
+          <CardFooter>
+            <p className="text-[11px] text-muted">
+              Reversals reference the original transaction and cannot themselves be reversed.
+            </p>
+          </CardFooter>
+        </Card>
       </div>
+
+      {lastReversal && (
+        <Card className="border-emerald-200">
+          <CardBody className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-start gap-3">
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-success-soft text-success">
+                <ShieldCheck className="h-4 w-4" aria-hidden="true" />
+              </span>
+              <div className="min-w-0">
+                <h2 className="text-sm font-semibold text-ink">Reversal settled</h2>
+                <p className="mt-0.5 truncate font-mono text-[11px] text-muted">
+                  {lastReversal.transaction_id || lastReversal.id}
+                </p>
+              </div>
+            </div>
+            <Link
+              to={`/transactions/${lastReversal.transaction_id || lastReversal.id}`}
+              className="inline-flex items-center gap-1 text-xs font-semibold text-brand hover:underline"
+            >
+              View compensating postings <ExternalLink className="h-3 w-3" aria-hidden="true" />
+            </Link>
+          </CardBody>
+        </Card>
+      )}
+
+      <Card>
+        <CardHeader>
+          <div>
+            <h2 className="text-sm font-semibold text-ink">Administrative safeguards</h2>
+            <p className="mt-0.5 text-xs text-muted">Controls enforced by the database and API layer.</p>
+          </div>
+        </CardHeader>
+        <CardBody>
+          <ul className="grid grid-cols-1 gap-3 text-xs text-muted sm:grid-cols-3">
+            <li className="flex items-start gap-2 rounded-lg border border-line p-3">
+              <Lock className="mt-0.5 h-4 w-4 shrink-0 text-brand" aria-hidden="true" />
+              <span>
+                <span className="block font-semibold text-ink-soft">Role enforced</span>
+                <span className="mt-0.5 block">Admin routes require a verified admin role.</span>
+              </span>
+            </li>
+            <li className="flex items-start gap-2 rounded-lg border border-line p-3">
+              <Fingerprint className="mt-0.5 h-4 w-4 shrink-0 text-brand" aria-hidden="true" />
+              <span>
+                <span className="block font-semibold text-ink-soft">Idempotent reversal</span>
+                <span className="mt-0.5 block">Retries reuse the key; changed intent rotates it.</span>
+              </span>
+            </li>
+            <li className="flex items-start gap-2 rounded-lg border border-line p-3">
+              <ScrollText className="mt-0.5 h-4 w-4 shrink-0 text-brand" aria-hidden="true" />
+              <span>
+                <span className="block font-semibold text-ink-soft">Audit attributed</span>
+                <span className="mt-0.5 block">Actions are attributed to your admin identity.</span>
+              </span>
+            </li>
+          </ul>
+        </CardBody>
+        <CardFooter>
+          <p className="flex items-center gap-1.5 text-[11px] text-muted">
+            <AlertTriangle className="h-3.5 w-3.5 text-warning" aria-hidden="true" />
+            Signed in as <span className="font-mono text-ink-soft">{user?.email}</span>
+          </p>
+        </CardFooter>
+      </Card>
+
+      <ConfirmDialog
+        isOpen={!!pendingUserStatus}
+        onClose={() => !userStatusLoading && setPendingUserStatus(null)}
+        onConfirm={applyUserStatus}
+        title={suspension ? 'Suspend user?' : 'Activate user?'}
+        description={
+          pendingUserStatus
+            ? `You are about to ${suspension ? 'suspend' : 'activate'} user ${pendingUserStatus.userId}. Reason: “${
+                pendingUserStatus.reason
+              }”. This takes effect immediately and is recorded in the audit log.`
+            : ''
+        }
+        confirmLabel={suspension ? 'Suspend user' : 'Activate user'}
+        tone={suspension ? 'danger' : 'success'}
+        loading={userStatusLoading}
+      />
     </div>
   );
 }

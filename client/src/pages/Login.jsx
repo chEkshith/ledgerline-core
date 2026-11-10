@@ -2,31 +2,41 @@ import React, { useState } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { Lock, Mail, ArrowRight, User } from 'lucide-react';
+import AuthLayout from '../components/AuthLayout';
 import Alert from '../components/Alert';
+import { Button, Field, Input, PasswordInput } from '../components/ui';
 
 export default function Login() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [fieldErrors, setFieldErrors] = useState({});
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
-  const { login } = useAuth();
+  const { login, authError, setAuthError } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
 
-  const from = location.state?.from?.pathname || '/';
+  const from = location.state?.from?.pathname || '/dashboard';
 
-  async function handleSubmit(e) {
-    e.preventDefault();
-    if (!email || !password) {
-      setError('Please provide both email and password');
-      return;
-    }
+  function validate() {
+    const next = {};
+    if (!email.trim()) next.email = 'Enter your email address';
+    else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) next.email = 'Enter a valid email address';
+    if (!password) next.password = 'Enter your password';
+    setFieldErrors(next);
+    return Object.keys(next).length === 0;
+  }
+
+  async function handleSubmit(event) {
+    event.preventDefault();
+    if (!validate()) return;
 
     setLoading(true);
     setError(null);
+    setAuthError(null);
     try {
-      await login(email, password);
+      await login(email.trim(), password);
       navigate(from, { replace: true });
     } catch (err) {
       setError(err.message || 'Login failed. Please verify credentials.');
@@ -37,96 +47,96 @@ export default function Login() {
 
   function handlePrefillEmail(sampleEmail) {
     setEmail(sampleEmail);
+    setFieldErrors((current) => ({ ...current, email: undefined }));
     setError(null);
   }
 
   return (
-    <div className="min-h-[85vh] flex items-center justify-center px-4 py-12">
-      <div className="w-full max-w-md">
-        {/* Brand header */}
-        <div className="text-center mb-8">
-          <div className="inline-flex w-14 h-14 rounded-2xl bg-gradient-to-br from-teal-500 to-cyan-500 items-center justify-center font-bold text-white text-2xl shadow-xl shadow-teal-500/25 mb-4">
-            LL
-          </div>
-          <h1 className="text-2xl font-bold text-white tracking-tight">Sign in to LedgerLine</h1>
-          <p className="text-slate-400 text-sm mt-1">Double-entry ledger transaction platform</p>
-        </div>
-
-        {/* Card */}
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 sm:p-8 shadow-2xl space-y-6">
-          {error && <Alert type="error" message={error} onClose={() => setError(null)} />}
-
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div>
-              <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">
-                Email Address
-              </label>
-              <div className="relative">
-                <Mail className="w-5 h-5 text-slate-500 absolute left-3.5 top-1/2 -translate-y-1/2" />
-                <input
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="user@example.com"
-                  required
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-11 pr-4 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500 transition-colors"
-                />
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">
-                Password
-              </label>
-              <div className="relative">
-                <Lock className="w-5 h-5 text-slate-500 absolute left-3.5 top-1/2 -translate-y-1/2" />
-                <input
-                  type="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="••••••••••••"
-                  required
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-11 pr-4 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500 transition-colors"
-                />
-              </div>
-            </div>
-
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full mt-2 py-3 px-4 rounded-xl font-semibold text-sm text-white bg-gradient-to-r from-teal-500 to-teal-600 hover:from-teal-600 hover:to-teal-700 active:scale-[0.99] disabled:opacity-50 disabled:pointer-events-none transition-all shadow-lg shadow-teal-500/20 flex items-center justify-center gap-2"
-            >
-              {loading ? 'Authenticating...' : 'Sign In'}
-              <ArrowRight className="w-4 h-4" />
-            </button>
-          </form>
-
-          {/* Development-Only Sample Email Helper (Omitted from Production Builds, No Passwords Stored) */}
-          {import.meta.env.DEV && (
-            <div className="pt-4 border-t border-slate-800 text-xs text-slate-400">
-              <span className="font-medium text-slate-400 block mb-2">Dev Helper (Email Pre-fill only):</span>
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  onClick={() => handlePrefillEmail('customerA@test.local')}
-                  className="px-2.5 py-1.5 bg-slate-950 hover:bg-slate-800 border border-slate-800 rounded-lg text-slate-300 hover:text-white transition-colors flex items-center gap-1.5 text-[11px]"
-                >
-                  <User className="w-3 h-3 text-teal-400" />
-                  customerA@test.local
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* Register prompt */}
-        <p className="text-center text-sm text-slate-400 mt-6">
-          Don't have an account?{' '}
-          <Link to="/register" className="text-teal-400 hover:underline font-semibold">
-            Create Customer Account
-          </Link>
-        </p>
+    <AuthLayout>
+      <div className="mb-7">
+        <h1 className="text-2xl font-bold tracking-tight text-ink">Sign in to LedgerLine</h1>
+        <p className="mt-1 text-sm text-muted">Access your accounts, statements, and money movement tools.</p>
       </div>
-    </div>
+
+      {(error || authError) && (
+        <div className="mb-5">
+          <Alert
+            type="error"
+            message={error || authError}
+            onClose={() => {
+              setError(null);
+              setAuthError(null);
+            }}
+          />
+        </div>
+      )}
+
+      <form onSubmit={handleSubmit} className="space-y-4" noValidate>
+        <Field label="Email address" htmlFor="login-email" error={fieldErrors.email} required>
+          <Input
+            id="login-email"
+            type="email"
+            value={email}
+            onChange={(event) => {
+              setEmail(event.target.value);
+              if (fieldErrors.email) setFieldErrors((current) => ({ ...current, email: undefined }));
+            }}
+            placeholder="you@company.com"
+            autoComplete="email"
+            icon={Mail}
+            error={fieldErrors.email}
+            required
+          />
+        </Field>
+
+        <Field label="Password" htmlFor="login-password" error={fieldErrors.password} required>
+          <PasswordInput
+            id="login-password"
+            value={password}
+            onChange={(event) => {
+              setPassword(event.target.value);
+              if (fieldErrors.password) setFieldErrors((current) => ({ ...current, password: undefined }));
+            }}
+            placeholder="Enter your password"
+            autoComplete="current-password"
+            icon={Lock}
+            error={fieldErrors.password}
+            required
+          />
+        </Field>
+
+        <Button type="submit" size="lg" loading={loading} className="mt-2 w-full">
+          {loading ? 'Authenticating…' : 'Sign in'}
+          {!loading && <ArrowRight className="h-4 w-4" aria-hidden="true" />}
+        </Button>
+      </form>
+
+      {import.meta.env.DEV && (
+        <div className="mt-6 rounded-lg border border-line bg-slate-50 p-3">
+          <div className="mb-2 text-[10px] font-semibold uppercase tracking-widest text-muted">
+            Development helper · email pre-fill only
+          </div>
+          <button
+            type="button"
+            onClick={() => handlePrefillEmail('customerA@test.local')}
+            className="inline-flex items-center gap-1.5 rounded-md border border-line bg-surface px-2.5 py-1.5 text-[11px] font-medium text-ink-soft transition-colors hover:bg-slate-100"
+          >
+            <User className="h-3 w-3 text-brand" aria-hidden="true" />
+            customerA@test.local
+          </button>
+        </div>
+      )}
+
+      <p className="mt-6 text-center text-sm text-muted">
+        Don&apos;t have an account?{' '}
+        <Link to="/register" className="font-semibold text-brand hover:underline">
+          Create a customer account
+        </Link>
+      </p>
+
+      <p className="mt-8 text-center text-[11px] leading-relaxed text-slate-400">
+        Sessions are stored in this browser tab only. Sign in again if the tab is closed.
+      </p>
+    </AuthLayout>
   );
 }

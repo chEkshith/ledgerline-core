@@ -3,6 +3,9 @@
   "version": "1.0.0",
   "description": "LedgerLine — Secure Financial Transaction Management System Monorepo",
   "private": true,
+  "engines": {
+    "node": "24.x"
+  },
   "scripts": {
     "install:server": "npm --prefix server install",
     "install:client": "npm --prefix client install",

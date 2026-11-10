@@ -5,7 +5,6 @@ import * as api from '../services/api';
 import {
   paiseToRupees,
   formatTimestamp,
-  generateIdempotencyKey,
   verifyLedgerPostings,
   bigIntAbs,
   transitionReversalState,
@@ -20,37 +19,81 @@ import {
   RotateCcw,
   RefreshCw,
   ExternalLink,
+  ArrowLeftRight,
+  AlertTriangle,
 } from 'lucide-react';
 import Alert from '../components/Alert';
 import Modal from '../components/Modal';
+import {
+  Badge,
+  Button,
+  ButtonLink,
+  Card,
+  CardBody,
+  CardFooter,
+  CardHeader,
+  EmptyState,
+  EntryTypeBadge,
+  Field,
+  PageLoading,
+  Textarea,
+  TransactionStatusBadge,
+  useToast,
+} from '../components/ui';
+
+const verificationTone = {
+  balanced: 'success',
+  pending: 'warning',
+  refused: 'danger',
+};
+
+function verificationDetails(status) {
+  switch (status) {
+    case 'balanced':
+      return 'Debit and credit sum to zero and both match the transaction amount exactly.';
+    case 'pending':
+      return 'This transaction has not settled. Postings appear only after successful settlement.';
+    case 'refused':
+      return 'The financial engine recorded a business refusal. No ledger postings were created.';
+    default:
+      return 'The postings failed ledger integrity validation. Treat this transaction as unsettled.';
+  }
+}
+
+function VerificationIcon({ status }) {
+  if (status === 'balanced') return <CheckCircle2 className="h-4 w-4" aria-hidden="true" />;
+  if (status === 'pending') return <Clock className="h-4 w-4" aria-hidden="true" />;
+  if (status === 'refused') return <XCircle className="h-4 w-4" aria-hidden="true" />;
+  return <AlertTriangle className="h-4 w-4" aria-hidden="true" />;
+}
 
 export default function TransactionDetail() {
   const { id } = useParams();
   const { isAdmin } = useAuth();
+  const toast = useToast();
 
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [success, setSuccess] = useState(null);
 
-  // Reversal Modal and State Management
   const [isReverseModalOpen, setIsReverseModalOpen] = useState(false);
   const [reverseReason, setReverseReason] = useState('');
+  const [reverseError, setReverseError] = useState(null);
   const [reversing, setReversing] = useState(false);
-  // Store reversal idempotency operation state (key, txId, and immutable payload)
   const [reversalOp, setReversalOp] = useState(() =>
     transitionReversalState(null, { type: 'INIT', txId: id })
   );
 
-  // Guarantee that navigating to a different transaction ID resets the reversal state and key
   useEffect(() => {
+    setData(null);
     setReversalOp(transitionReversalState(null, { type: 'CHANGE_TX_ID', txId: id }));
     setReverseReason('');
+    setReverseError(null);
   }, [id]);
 
   function handleReasonChange(newVal) {
     setReverseReason(newVal);
-    // If the reason is changed after a failure, transitionReversalState automatically starts a new operation
+    setReverseError(null);
     setReversalOp((prev) => transitionReversalState(prev, { type: 'CHANGE_REASON', reason: newVal }));
   }
 
@@ -75,274 +118,402 @@ export default function TransactionDetail() {
     e.preventDefault();
     const trimmedReason = reverseReason.trim();
     if (!trimmedReason) {
-      setError('Please provide a legitimate reason for the administrative reversal');
+      setReverseError('Please provide a legitimate reason for the administrative reversal');
       return;
     }
 
     setReversing(true);
-    setError(null);
+    setReverseError(null);
     try {
-      // Re-use persistent idempotency key and request payload across retries
       const res = await api.reverseTransaction(id, {
         reason: trimmedReason,
         idempotencyKey: reversalOp.idempotencyKey,
       });
-      setSuccess(`Reversal executed successfully. Compensating Transaction ID: ${res.transaction_id || res.id}`);
+      toast.success(`Reversal executed. Compensating transaction: ${res.transaction_id || res.id}`);
       setIsReverseModalOpen(false);
       setReverseReason('');
-      // Rotate idempotency key ONLY upon successful execution
       setReversalOp(transitionReversalState(reversalOp, { type: 'SUCCESS' }));
       await loadTransaction();
     } catch (err) {
-      // Mark failed attempt so subsequent retries preserve the exact same key and payload
       setReversalOp((prev) =>
         transitionReversalState(prev, {
           type: 'SUBMIT_FAILURE',
           payload: { reason: trimmedReason },
         })
       );
-      setError(err.message || 'Reversal failed');
+      setReverseError(err.message || 'Reversal failed');
     } finally {
       setReversing(false);
     }
   }
 
   if (loading) {
-    return (
-      <div className="text-center py-24 text-slate-500 text-sm">
-        <RefreshCw className="w-6 h-6 animate-spin mx-auto mb-2 text-teal-400" />
-        Loading double-entry ledger postings...
-      </div>
-    );
+    return <PageLoading label="Loading ledger postings…" />;
   }
 
   const tx = data?.transaction;
   const postings = data?.postings || [];
-
-  // Explicit status-based ledger verification
   const verification = verifyLedgerPostings(tx, postings);
+  const tone = verificationTone[verification.status] || 'danger';
 
   return (
-    <div className="max-w-4xl mx-auto space-y-6 animate-fadeIn">
-      {/* Header */}
-      <div className="flex items-center justify-between pb-6 border-b border-slate-800">
-        <div className="flex items-center gap-3">
+    <div className="mx-auto max-w-5xl space-y-6 animate-fadeIn">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div className="flex items-start gap-3">
           <Link
             to="/accounts"
-            className="p-2 bg-slate-900 hover:bg-slate-800 border border-slate-800 rounded-xl text-slate-400 hover:text-white transition-colors"
+            className="mt-0.5 inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-line bg-surface text-ink-soft shadow-sm transition-colors hover:bg-slate-50"
+            aria-label="Back to accounts"
           >
-            <ArrowLeft className="w-4 h-4" />
+            <ArrowLeft className="h-4 w-4" aria-hidden="true" />
           </Link>
-          <div>
-            <h1 className="text-xl sm:text-2xl font-bold text-white tracking-tight">
-              Transaction Details & Ledger Verification
-            </h1>
-            <p className="text-xs text-slate-400 font-mono">{id}</p>
+          <div className="min-w-0">
+            <p className="text-[11px] font-semibold uppercase tracking-widest text-muted">Ledger verification</p>
+            <h1 className="mt-0.5 text-xl font-bold tracking-tight text-ink sm:text-2xl">Transaction detail</h1>
+            <p className="mt-1 truncate font-mono text-[11px] text-muted">{id}</p>
           </div>
         </div>
 
-        {isAdmin && tx?.status === 'posted' && tx?.type !== 'reversal' && (
-          <button
-            onClick={() => setIsReverseModalOpen(true)}
-            className="px-4 py-2 bg-rose-600/20 hover:bg-rose-600/30 border border-rose-500/30 text-rose-300 rounded-xl text-xs font-bold transition-colors flex items-center gap-1.5"
-          >
-            <RotateCcw className="w-4 h-4" />
-            Admin Reversal
-          </button>
-        )}
+        <div className="flex items-center gap-2">
+          <Button variant="secondary" size="sm" onClick={loadTransaction}>
+            <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />
+            Refresh
+          </Button>
+          {isAdmin && tx?.status === 'posted' && tx?.type !== 'reversal' && (
+            <Button
+              variant="outlineDanger"
+              size="sm"
+              onClick={() => {
+                setReverseError(null);
+                setIsReverseModalOpen(true);
+              }}
+            >
+              <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />
+              Admin reversal
+            </Button>
+          )}
+        </div>
       </div>
 
       {error && <Alert type="error" message={error} onClose={() => setError(null)} />}
-      {success && <Alert type="success" message={success} onClose={() => setSuccess(null)} />}
 
-      {tx && (
+      {!tx ? (
+        <Card>
+          <EmptyState
+            icon={FileText}
+            title="Transaction not found"
+            description="The transaction may not exist, or your account may not have access to it."
+            action={
+              <ButtonLink to="/accounts" variant="secondary" size="sm">
+                Back to accounts
+              </ButtonLink>
+            }
+          />
+        </Card>
+      ) : (
         <>
-          {/* Metadata Grid */}
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-6">
-            <div className="flex items-center justify-between pb-4 border-b border-slate-800">
-              <div>
-                <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 block mb-1">
-                  Settled Amount
-                </span>
-                <div className="text-3xl font-extrabold font-mono text-white">
-                  {paiseToRupees(tx.amount_paise)}
+          <Card>
+            <CardBody className="space-y-5">
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <div className="text-[10px] font-semibold uppercase tracking-widest text-muted">
+                    Transaction amount
+                  </div>
+                  <div className="mt-1 text-3xl font-bold tracking-tight text-ink tabular-nums sm:text-4xl">
+                    {paiseToRupees(tx.amount_paise)}
+                  </div>
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    <TransactionStatusBadge status={tx.status} />
+                    <Badge variant="neutral" className="capitalize">
+                      {tx.type ? tx.type.charAt(0).toUpperCase() + tx.type.slice(1) : '—'}
+                    </Badge>
+                    <Badge variant="neutral">{tx.currency || 'INR'}</Badge>
+                  </div>
+                </div>
+
+                <div className="rounded-lg border border-line bg-slate-50 p-3 text-xs">
+                  <div className="text-[10px] font-semibold uppercase tracking-widest text-muted">Created</div>
+                  <div className="mt-1 font-medium text-ink-soft">{formatTimestamp(tx.created_at)}</div>
+                  <div className="mt-2 text-[10px] font-semibold uppercase tracking-widest text-muted">
+                    Last updated
+                  </div>
+                  <div className="mt-1 font-medium text-ink-soft">{formatTimestamp(tx.updated_at)}</div>
                 </div>
               </div>
 
-              <span
-                className={`px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider ${
-                  tx.status === 'posted'
-                    ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
-                    : tx.status === 'refused'
-                    ? 'bg-rose-500/10 text-rose-400 border border-rose-500/20'
-                    : 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
-                }`}
-              >
-                {tx.status}
-              </span>
-            </div>
+              <div className="rounded-lg border border-line bg-slate-50/70 p-3">
+                <div className="flex flex-col gap-2 text-xs sm:flex-row sm:items-center">
+                  <div className="min-w-0 flex-1">
+                    <div className="text-[10px] font-semibold uppercase tracking-widest text-muted">Source</div>
+                    {tx.source_account_id ? (
+                      <Link
+                        to={`/accounts/${tx.source_account_id}`}
+                        className="mt-1 inline-flex max-w-full items-center gap-1 font-mono text-[11px] text-brand hover:underline"
+                      >
+                        <span className="truncate">{tx.source_account_id}</span>
+                        <ExternalLink className="h-3 w-3 shrink-0" aria-hidden="true" />
+                      </Link>
+                    ) : (
+                      <span className="mt-1 block text-muted">—</span>
+                    )}
+                  </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 text-xs font-mono">
-              <div className="bg-slate-950 p-3.5 rounded-xl border border-slate-800/80">
-                <span className="text-slate-500 block mb-1">Operation Type</span>
-                <span className="text-white font-bold capitalize">{tx.type}</span>
+                  <ArrowLeftRight className="hidden h-4 w-4 shrink-0 text-slate-400 sm:block" aria-hidden="true" />
+
+                  <div className="min-w-0 flex-1 sm:text-right">
+                    <div className="text-[10px] font-semibold uppercase tracking-widest text-muted">Destination</div>
+                    {tx.destination_account_id ? (
+                      <Link
+                        to={`/accounts/${tx.destination_account_id}`}
+                        className="mt-1 inline-flex max-w-full items-center gap-1 font-mono text-[11px] text-brand hover:underline sm:justify-end"
+                      >
+                        <span className="truncate">{tx.destination_account_id}</span>
+                        <ExternalLink className="h-3 w-3 shrink-0" aria-hidden="true" />
+                      </Link>
+                    ) : (
+                      <span className="mt-1 block text-muted">—</span>
+                    )}
+                  </div>
+                </div>
               </div>
-              <div className="bg-slate-950 p-3.5 rounded-xl border border-slate-800/80">
-                <span className="text-slate-500 block mb-1">Currency</span>
-                <span className="text-white">{tx.currency || 'INR'}</span>
-              </div>
-              <div className="bg-slate-950 p-3.5 rounded-xl border border-slate-800/80">
-                <span className="text-slate-500 block mb-1">Timestamp</span>
-                <span className="text-slate-300">{formatTimestamp(tx.created_at)}</span>
-              </div>
-              <div className="bg-slate-950 p-3.5 rounded-xl border border-slate-800/80 col-span-1 sm:col-span-2 lg:col-span-3">
-                <span className="text-slate-500 block mb-1">Created By Actor UUID</span>
-                <span className="text-teal-400 break-all">{tx.created_by}</span>
-              </div>
+
+              <dl className="grid grid-cols-1 gap-3 text-xs sm:grid-cols-2">
+                <div className="flex items-center justify-between gap-3 rounded-lg border border-line px-3 py-2">
+                  <dt className="text-muted">Created by</dt>
+                  <dd className="min-w-0 truncate font-mono text-[10px] text-ink-soft" title={tx.created_by}>
+                    {tx.created_by || '—'}
+                  </dd>
+                </div>
+                <div className="flex items-center justify-between gap-3 rounded-lg border border-line px-3 py-2">
+                  <dt className="text-muted">Original transaction</dt>
+                  <dd className="min-w-0 truncate font-mono text-[10px]">
+                    {tx.original_transaction_id ? (
+                      <Link to={`/transactions/${tx.original_transaction_id}`} className="text-brand hover:underline">
+                        {tx.original_transaction_id}
+                      </Link>
+                    ) : (
+                      <span className="text-muted">—</span>
+                    )}
+                  </dd>
+                </div>
+              </dl>
+
               {tx.refusal_reason && (
-                <div className="bg-rose-950/30 border border-rose-500/30 p-3.5 rounded-xl col-span-full">
-                  <span className="text-rose-400 font-bold block mb-1">Engine Refusal Reason</span>
-                  <span className="text-rose-200">{tx.refusal_reason}</span>
+                <div className="flex items-start gap-3 rounded-lg border border-red-200 bg-danger-soft/60 p-3 text-xs text-red-900">
+                  <XCircle className="mt-0.5 h-4 w-4 shrink-0 text-danger" aria-hidden="true" />
+                  <div>
+                    <p className="font-semibold">Engine refusal</p>
+                    <p className="mt-0.5 font-mono text-[11px]">{tx.refusal_reason}</p>
+                  </div>
                 </div>
               )}
-            </div>
-          </div>
+            </CardBody>
+          </Card>
 
-          {/* Double-Entry Ledger Postings Table */}
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-xl space-y-4">
-            <div className="px-6 py-4 border-b border-slate-800 flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <ShieldCheck className="w-5 h-5 text-teal-400" />
-                <h3 className="text-sm font-bold text-white uppercase tracking-wider">
-                  Double-Entry Ledger Postings
-                </h3>
+          <Card className="overflow-hidden">
+            <CardHeader className="flex-col items-start gap-3 sm:flex-row sm:items-center">
+              <div>
+                <h2 className="flex items-center gap-2 text-sm font-semibold text-ink">
+                  <ShieldCheck className="h-4 w-4 text-brand" aria-hidden="true" />
+                  Double-entry postings
+                </h2>
+                <p className="mt-0.5 text-xs text-muted">
+                  {postings.length} {postings.length === 1 ? 'posting' : 'postings'} recorded for this transaction.
+                </p>
               </div>
-              <span className={`px-2.5 py-1 rounded text-[11px] font-mono font-bold uppercase border ${verification.badgeClass}`}>
-                {verification.label}
-              </span>
-            </div>
+              <Badge variant={tone}>{verification.label}</Badge>
+            </CardHeader>
 
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs font-mono">
-                <thead className="bg-slate-950/60 text-slate-400 font-semibold border-b border-slate-800">
-                  <tr>
-                    <th className="px-6 py-3">Seq #</th>
-                    <th className="px-6 py-3">Account UUID</th>
-                    <th className="px-6 py-3">Entry Type</th>
-                    <th className="px-6 py-3 text-right">Magnitude</th>
-                    <th className="px-6 py-3 text-right">Signed Amount</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-800">
-                  {postings.length === 0 ? (
-                    <tr>
-                      <td colSpan={5} className="px-6 py-8 text-center text-slate-500">
-                        Zero postings recorded (as expected for refused or non-settled operations).
-                      </td>
-                    </tr>
-                  ) : (
-                    postings.map((p) => {
-                      const isCredit = p.entry_type === 'credit';
-                      return (
-                        <tr key={p.id} className="hover:bg-slate-800/40 transition-colors">
-                          <td className="px-6 py-3 text-slate-400">{p.sequence_number}</td>
-                          <td className="px-6 py-3 text-slate-300">
-                            <Link to={`/accounts/${p.account_id}`} className="text-teal-400 hover:underline">
-                              {p.account_id}
-                            </Link>
-                          </td>
-                          <td className="px-6 py-3">
-                            <span
-                              className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${
-                                isCredit
-                                  ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
-                                  : 'bg-rose-500/10 text-rose-400 border border-rose-500/20'
-                              }`}
-                            >
-                              {p.entry_type}
-                            </span>
-                          </td>
-                          <td className="px-6 py-3 text-right text-slate-300">
-                            {paiseToRupees(p.amount_paise)}
-                          </td>
-                          <td
-                            className={`px-6 py-3 text-right font-bold ${
-                              isCredit ? 'text-emerald-400' : 'text-rose-400'
-                            }`}
-                          >
-                            {isCredit ? '+' : '-'}
-                            {paiseToRupees(bigIntAbs(p.signed_amount_paise))}
-                          </td>
+            <CardBody className="space-y-4">
+              <div
+                className={`flex items-start gap-3 rounded-lg border p-3 text-xs ${
+                  tone === 'success'
+                    ? 'border-emerald-200 bg-success-soft/60 text-emerald-900'
+                    : tone === 'warning'
+                      ? 'border-amber-200 bg-warning-soft/60 text-amber-900'
+                      : 'border-red-200 bg-danger-soft/60 text-red-900'
+                }`}
+              >
+                <span className="mt-0.5 shrink-0">
+                  <VerificationIcon status={verification.status} />
+                </span>
+                <div>
+                  <p className="font-semibold">{verification.label}</p>
+                  <p className="mt-0.5 leading-relaxed">{verificationDetails(verification.status)}</p>
+                </div>
+              </div>
+
+              {postings.length === 0 ? (
+                <div className="rounded-lg border border-dashed border-line bg-slate-50/60 px-4 py-8 text-center">
+                  <FileText className="mx-auto h-8 w-8 text-slate-300" aria-hidden="true" />
+                  <p className="mt-2 text-sm font-semibold text-ink-soft">No ledger postings</p>
+                  <p className="mx-auto mt-1 max-w-md text-xs text-muted">
+                    Zero postings are expected for refused or non-settled operations.
+                  </p>
+                </div>
+              ) : (
+                <>
+                  <div className="hidden overflow-x-auto md:block">
+                    <table className="w-full text-left text-xs">
+                      <thead className="border-b border-line bg-slate-50/80 text-[10px] font-semibold uppercase tracking-widest text-muted">
+                        <tr>
+                          <th className="px-4 py-3">Seq</th>
+                          <th className="px-4 py-3">Account</th>
+                          <th className="px-4 py-3">Entry</th>
+                          <th className="px-4 py-3 text-right">Magnitude</th>
+                          <th className="px-4 py-3 text-right">Signed amount</th>
                         </tr>
+                      </thead>
+                      <tbody className="divide-y divide-line">
+                        {postings.map((posting) => {
+                          const credit = String(posting.entry_type || '').toLowerCase() === 'credit';
+                          return (
+                            <tr key={posting.id} className="transition-colors hover:bg-slate-50">
+                              <td className="px-4 py-3 font-mono text-muted">{posting.sequence_number}</td>
+                              <td className="px-4 py-3">
+                                <Link
+                                  to={`/accounts/${posting.account_id}`}
+                                  className="inline-flex max-w-[220px] items-center gap-1 font-mono text-[11px] text-brand hover:underline"
+                                  title={posting.account_id}
+                                >
+                                  <span className="truncate">{posting.account_id}</span>
+                                  <ExternalLink className="h-3 w-3 shrink-0" aria-hidden="true" />
+                                </Link>
+                              </td>
+                              <td className="px-4 py-3">
+                                <EntryTypeBadge type={posting.entry_type} />
+                              </td>
+                              <td className="px-4 py-3 text-right text-ink-soft tabular-nums">
+                                {paiseToRupees(posting.amount_paise)}
+                              </td>
+                              <td
+                                className={`px-4 py-3 text-right font-semibold tabular-nums ${
+                                  credit ? 'text-success' : 'text-danger'
+                                }`}
+                              >
+                                {credit ? '+' : '−'}
+                                {paiseToRupees(bigIntAbs(posting.signed_amount_paise))}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <ul className="divide-y divide-line md:hidden">
+                    {postings.map((posting) => {
+                      const credit = String(posting.entry_type || '').toLowerCase() === 'credit';
+                      return (
+                        <li key={posting.id} className="py-3">
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-2">
+                                <EntryTypeBadge type={posting.entry_type} />
+                                <span className="font-mono text-[10px] text-muted">#{posting.sequence_number}</span>
+                              </div>
+                              <Link
+                                to={`/accounts/${posting.account_id}`}
+                                className="mt-1.5 inline-flex max-w-full items-center gap-1 font-mono text-[10px] text-brand hover:underline"
+                              >
+                                <span className="truncate">{posting.account_id}</span>
+                                <ExternalLink className="h-3 w-3 shrink-0" aria-hidden="true" />
+                              </Link>
+                            </div>
+                            <div className="text-right">
+                              <div
+                                className={`text-sm font-bold tabular-nums ${
+                                  credit ? 'text-success' : 'text-danger'
+                                }`}
+                              >
+                                {credit ? '+' : '−'}
+                                {paiseToRupees(bigIntAbs(posting.signed_amount_paise))}
+                              </div>
+                              <div className="mt-0.5 text-[10px] text-muted tabular-nums">
+                                {paiseToRupees(posting.amount_paise)}
+                              </div>
+                            </div>
+                          </div>
+                        </li>
                       );
-                    })
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
+                    })}
+                  </ul>
+                </>
+              )}
+            </CardBody>
+
+            <CardFooter>
+              <p className="text-[11px] text-muted">
+                Verification uses exact BigInt arithmetic. A posted transaction must have exactly one debit and
+                one credit that sum to zero.
+              </p>
+            </CardFooter>
+          </Card>
         </>
       )}
 
-      {/* Admin Reversal Modal */}
       <Modal
         isOpen={isReverseModalOpen}
         onClose={() => !reversing && setIsReverseModalOpen(false)}
-        title="Execute Administrative Reversal"
+        title="Execute administrative reversal"
+        footer={
+          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-end">
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => setIsReverseModalOpen(false)}
+              disabled={reversing}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="submit"
+              form="reverse-form"
+              variant="danger"
+              size="sm"
+              loading={reversing}
+              disabled={!reverseReason.trim()}
+            >
+              {reversing ? 'Executing…' : 'Execute reversal'}
+            </Button>
+          </div>
+        }
       >
-        <form onSubmit={handleReverse} className="space-y-4">
-          <p className="text-xs text-slate-400 leading-relaxed">
-            Executing a reversal creates a new compensating financial transaction with mirrored debit/credit
-            postings that returns funds to their origin, referencing original transaction{' '}
-            <code className="text-teal-400 font-mono">{id}</code>.
+        <form id="reverse-form" onSubmit={handleReverse} className="space-y-4">
+          {reverseError && <Alert type="error" message={reverseError} onClose={() => setReverseError(null)} />}
+
+          <p className="text-xs leading-relaxed text-muted">
+            A reversal creates a new compensating transaction with mirrored debit and credit postings, returning
+            funds to their origin and referencing original transaction{' '}
+            <code className="font-mono text-ink-soft">{id}</code>.
           </p>
 
-          <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-800 text-[11px] font-mono text-slate-400 break-all">
-            <span className="text-slate-500 block mb-0.5 uppercase tracking-wider text-[10px]">
-              Assigned Idempotency Key (Preserved on Retry)
-            </span>
-            <span className="text-teal-400 font-semibold">{reversalOp.idempotencyKey}</span>
+          <div className="rounded-lg border border-line bg-slate-50 p-3">
+            <div className="text-[10px] font-semibold uppercase tracking-widest text-muted">
+              Assigned idempotency key · preserved on retry
+            </div>
+            <div className="mt-1 break-all font-mono text-[10px] font-semibold text-brand">
+              {reversalOp.idempotencyKey}
+            </div>
           </div>
 
-          <div>
-            <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">
-              Auditable Justification / Reason
-            </label>
-            <textarea
+          <Field
+            label="Auditable justification"
+            htmlFor="reverse-reason"
+            hint="Changing the reason after a failed attempt starts a new operation with a fresh key."
+            required
+          >
+            <Textarea
+              id="reverse-reason"
               rows={3}
               value={reverseReason}
-              onChange={(e) => handleReasonChange(e.target.value)}
+              onChange={(event) => handleReasonChange(event.target.value)}
               disabled={reversing}
               placeholder="e.g. Disputed transaction investigation case #8392"
               required
-              className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-teal-500 disabled:opacity-50"
             />
-          </div>
-
-          <div className="pt-4 border-t border-slate-800 flex justify-end gap-3">
-            <button
-              type="button"
-              disabled={reversing}
-              onClick={() => setIsReverseModalOpen(false)}
-              className="px-4 py-2 rounded-xl text-sm font-medium text-slate-400 hover:text-white hover:bg-slate-800 disabled:opacity-50 transition-colors"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={reversing || !reverseReason.trim()}
-              className="px-5 py-2.5 rounded-xl text-sm font-semibold text-white bg-rose-600 hover:bg-rose-700 disabled:opacity-50 transition-colors flex items-center gap-2"
-            >
-              {reversing ? (
-                <>
-                  <RefreshCw className="w-4 h-4 animate-spin" />
-                  <span>Executing Reversal...</span>
-                </>
-              ) : (
-                'Execute Reversal'
-              )}
-            </button>
-          </div>
+          </Field>
         </form>
       </Modal>
     </div>

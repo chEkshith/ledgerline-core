@@ -4,6 +4,9 @@
   "description": "LedgerLine Backend API Server",
   "type": "module",
   "main": "src/server.js",
+  "engines": {
+    "node": "24.x"
+  },
   "scripts": {
     "start": "node src/server.js",
     "dev": "nodemon src/server.js",

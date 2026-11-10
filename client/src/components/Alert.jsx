@@ -5,32 +5,36 @@ export default function Alert({ type = 'info', message, onClose }) {
   if (!message) return null;
 
   const styles = {
-    info: 'bg-cyan-950/50 border-cyan-500/40 text-cyan-200',
-    success: 'bg-emerald-950/50 border-emerald-500/40 text-emerald-200',
-    warning: 'bg-amber-950/50 border-amber-500/40 text-amber-200',
-    error: 'bg-rose-950/50 border-rose-500/40 text-rose-200',
+    info: 'bg-accent-soft border-blue-200 text-blue-900',
+    success: 'bg-success-soft border-emerald-200 text-emerald-900',
+    warning: 'bg-warning-soft border-amber-200 text-amber-900',
+    error: 'bg-danger-soft border-red-200 text-red-900',
   };
 
   const icons = {
-    info: <Info className="w-5 h-5 text-cyan-400 shrink-0" />,
-    success: <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />,
-    warning: <AlertCircle className="w-5 h-5 text-amber-400 shrink-0" />,
-    error: <AlertCircle className="w-5 h-5 text-rose-400 shrink-0" />,
+    info: <Info className="h-4 w-4 shrink-0 text-accent" />,
+    success: <CheckCircle2 className="h-4 w-4 shrink-0 text-success" />,
+    warning: <AlertCircle className="h-4 w-4 shrink-0 text-warning" />,
+    error: <AlertCircle className="h-4 w-4 shrink-0 text-danger" />,
   };
 
   return (
-    <div className={`p-4 rounded-xl border flex items-start justify-between gap-3 ${styles[type] || styles.info}`}>
-      <div className="flex items-start gap-3">
+    <div
+      className={`flex items-start justify-between gap-3 rounded-lg border px-3.5 py-3 ${styles[type] || styles.info}`}
+      role={type === 'error' ? 'alert' : 'status'}
+    >
+      <div className="flex items-start gap-2.5">
         {icons[type] || icons.info}
         <div className="text-sm leading-relaxed">{message}</div>
       </div>
       {onClose && (
         <button
+          type="button"
           onClick={onClose}
-          className="p-1 text-slate-400 hover:text-white rounded transition-colors"
+          className="rounded p-0.5 opacity-70 transition-opacity hover:opacity-100"
           aria-label="Dismiss alert"
         >
-          <X className="w-4 h-4" />
+          <X className="h-3.5 w-3.5" />
         </button>
       )}
     </div>

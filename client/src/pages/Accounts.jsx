@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { useAuth } from '../context/AuthContext';
 import * as api from '../services/api';
 import { paiseToRupees, formatTimestamp } from '../utils/formatters';
 import {
@@ -8,31 +7,51 @@ import {
   PlusCircle,
   Search,
   ExternalLink,
-  Shield,
-  Layers,
   RefreshCw,
   Building,
+  Copy,
+  Check,
+  ArrowLeftRight,
+  Layers,
+  CircleDollarSign,
 } from 'lucide-react';
 import Alert from '../components/Alert';
 import Modal from '../components/Modal';
+import {
+  AccountCardSkeleton,
+  AccountStatusBadge,
+  Badge,
+  Button,
+  ButtonLink,
+  Card,
+  CardBody,
+  CardFooter,
+  EmptyState,
+  Field,
+  Input,
+  PageHeader,
+  Select,
+  StatCard,
+  StatCardSkeleton,
+  useToast,
+} from '../components/ui';
 
 export default function Accounts() {
-  const { user, isAdmin } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
+  const toast = useToast();
+
   const [accounts, setAccounts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [success, setSuccess] = useState(null);
 
-  // New Account Modal State
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [newAccNumber, setNewAccNumber] = useState('');
   const [newCurrency, setNewCurrency] = useState('INR');
   const [submitting, setSubmitting] = useState(false);
 
-  // Filter State
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
+  const [copiedId, setCopiedId] = useState(null);
 
   const loadAccounts = useCallback(async () => {
     setLoading(true);
@@ -49,10 +68,21 @@ export default function Accounts() {
 
   useEffect(() => {
     loadAccounts();
+  }, [loadAccounts]);
+
+  useEffect(() => {
     if (searchParams.get('action') === 'create') {
+      generateSampleAccNumber();
       setIsModalOpen(true);
     }
-  }, [loadAccounts, searchParams]);
+  }, [searchParams]);
+
+  function closeModal() {
+    setIsModalOpen(false);
+    if (searchParams.get('action')) {
+      setSearchParams({}, { replace: true });
+    }
+  }
 
   async function handleCreateAccount(e) {
     e.preventDefault();
@@ -65,10 +95,10 @@ export default function Accounts() {
     setError(null);
     try {
       const res = await api.createAccount(newAccNumber.trim(), newCurrency);
-      setSuccess(`Account ${res.accountNumber} created successfully`);
+      toast.success(`Account ${res.accountNumber} created successfully`);
       setIsModalOpen(false);
       setNewAccNumber('');
-      setSearchParams({});
+      setSearchParams({}, { replace: true });
       await loadAccounts();
     } catch (err) {
       setError(err.message || 'Failed to create account');
@@ -82,232 +112,317 @@ export default function Accounts() {
     setNewAccNumber(`ACC-IN-${randomSuffix}`);
   }
 
+  async function copyAccountNumber(account) {
+    try {
+      await navigator.clipboard.writeText(account.account_number);
+      setCopiedId(account.id);
+      setTimeout(() => setCopiedId((current) => (current === account.id ? null : current)), 1600);
+    } catch {
+      toast.error('Could not copy account number');
+    }
+  }
+
   const filteredAccounts = accounts.filter((acc) => {
+    const query = search.trim().toLowerCase();
     const matchesSearch =
-      acc.account_number?.toLowerCase().includes(search.toLowerCase()) ||
-      acc.id?.toLowerCase().includes(search.toLowerCase());
+      !query ||
+      acc.account_number?.toLowerCase().includes(query) ||
+      acc.id?.toLowerCase().includes(query);
     const matchesStatus = statusFilter === 'all' || acc.status === statusFilter;
     return matchesSearch && matchesStatus;
   });
 
+  const customerAccounts = accounts.filter((account) => account.account_type === 'customer');
+  const activeAccounts = customerAccounts.filter((account) => account.status === 'active');
+  const systemAccounts = accounts.filter((account) => account.account_type === 'system');
+  const totalCustomerPaise = customerAccounts.reduce((total, account) => {
+    try {
+      return total + BigInt(account.current_balance || '0');
+    } catch {
+      return total;
+    }
+  }, 0n);
+
   return (
     <div className="space-y-6 animate-fadeIn">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 pb-6 border-b border-slate-800">
-        <div>
-          <h1 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">
-            Account Management
-          </h1>
-          <p className="text-slate-400 text-sm mt-1">
-            Secure vault & customer ledgers with Row-Level Security isolation.
-          </p>
-        </div>
-
-        <div className="flex items-center gap-3">
-          <button
-            onClick={loadAccounts}
-            disabled={loading}
-            className="p-2.5 bg-slate-900 hover:bg-slate-800 border border-slate-800 rounded-xl text-slate-400 hover:text-white transition-colors"
-            title="Refresh"
-            aria-label="Refresh"
-          >
-            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin text-teal-400' : ''}`} />
-          </button>
-          <button
-            onClick={() => {
-              generateSampleAccNumber();
-              setIsModalOpen(true);
-            }}
-            className="px-4 py-2.5 rounded-xl font-semibold text-sm text-white bg-gradient-to-r from-teal-500 to-teal-600 hover:from-teal-600 hover:to-teal-700 transition-all shadow-lg shadow-teal-500/20 flex items-center gap-2"
-          >
-            <PlusCircle className="w-4 h-4" />
-            Open Account
-          </button>
-        </div>
-      </div>
+      <PageHeader
+        eyebrow="Accounts"
+        title="Accounts"
+        description="Customer ledgers and system vaults, isolated with row-level security."
+        actions={
+          <>
+            <Button variant="secondary" size="sm" onClick={loadAccounts} disabled={loading}>
+              <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin text-brand' : ''}`} aria-hidden="true" />
+              Refresh
+            </Button>
+            <Button
+              size="sm"
+              onClick={() => {
+                generateSampleAccNumber();
+                setIsModalOpen(true);
+              }}
+            >
+              <PlusCircle className="h-3.5 w-3.5" aria-hidden="true" />
+              Open account
+            </Button>
+          </>
+        }
+      />
 
       {error && <Alert type="error" message={error} onClose={() => setError(null)} />}
-      {success && <Alert type="success" message={success} onClose={() => setSuccess(null)} />}
 
-      {/* Filter and Search Bar */}
-      <div className="flex flex-col sm:flex-row gap-3">
-        <div className="relative flex-1">
-          <Search className="w-4 h-4 text-slate-500 absolute left-3.5 top-1/2 -translate-y-1/2" />
-          <input
-            type="text"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search by account number or UUID..."
-            className="w-full bg-slate-900 border border-slate-800 rounded-xl pl-10 pr-4 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500 transition-colors"
-          />
-        </div>
-
-        <select
-          value={statusFilter}
-          onChange={(e) => setStatusFilter(e.target.value)}
-          className="bg-slate-900 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-300 focus:outline-none focus:border-teal-500"
-        >
-          <option value="all">All Statuses</option>
-          <option value="active">Active Only</option>
-          <option value="frozen">Frozen Only</option>
-          <option value="closed">Closed Only</option>
-        </select>
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+        {loading ? (
+          <>
+            <StatCardSkeleton />
+            <StatCardSkeleton />
+            <StatCardSkeleton />
+          </>
+        ) : (
+          <>
+            <StatCard
+              label="Customer balance"
+              value={paiseToRupees(totalCustomerPaise)}
+              detail={`${customerAccounts.length} customer ${customerAccounts.length === 1 ? 'ledger' : 'ledgers'}`}
+              icon={CircleDollarSign}
+              tone="brand"
+            />
+            <StatCard
+              label="Active accounts"
+              value={activeAccounts.length}
+              detail={`${customerAccounts.length - activeAccounts.length} not active`}
+              icon={Layers}
+              tone="success"
+            />
+            <StatCard
+              label="System vaults"
+              value={systemAccounts.length}
+              detail="Internal settlement accounts"
+              icon={Building}
+              tone="info"
+            />
+          </>
+        )}
       </div>
 
-      {/* Accounts Grid */}
+      <Card>
+        <CardBody className="flex flex-col gap-3 sm:flex-row sm:items-center">
+          <div className="relative flex-1">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" aria-hidden="true" />
+            <Input
+              type="text"
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="Search by account number or UUID…"
+              className="pl-9"
+              aria-label="Search accounts"
+            />
+          </div>
+
+          <div className="sm:w-48">
+            <Select
+              value={statusFilter}
+              onChange={(event) => setStatusFilter(event.target.value)}
+              aria-label="Filter accounts by status"
+            >
+              <option value="all">All statuses</option>
+              <option value="active">Active</option>
+              <option value="frozen">Frozen</option>
+              <option value="closed">Closed</option>
+            </Select>
+          </div>
+
+          <div className="shrink-0 text-xs text-muted">
+            {filteredAccounts.length} of {accounts.length} shown
+          </div>
+        </CardBody>
+      </Card>
+
       {loading ? (
-        <div className="text-center py-12 text-slate-500 text-sm">Loading accounts...</div>
-      ) : filteredAccounts.length === 0 ? (
-        <div className="text-center py-16 bg-slate-900 border border-slate-800 rounded-2xl p-8 space-y-3">
-          <Wallet className="w-12 h-12 text-slate-600 mx-auto" />
-          <div className="text-lg font-bold text-white">No Accounts Found</div>
-          <p className="text-slate-400 text-sm max-w-md mx-auto">
-            No accounts match your current filters. Open a new customer account to begin transactions.
-          </p>
+        <div className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-3">
+          <AccountCardSkeleton />
+          <AccountCardSkeleton />
+          <AccountCardSkeleton />
+          <AccountCardSkeleton />
+          <AccountCardSkeleton />
+          <AccountCardSkeleton />
         </div>
+      ) : filteredAccounts.length === 0 ? (
+        <Card>
+          <EmptyState
+            icon={Wallet}
+            title={accounts.length === 0 ? 'No accounts yet' : 'No accounts match your filters'}
+            description={
+              accounts.length === 0
+                ? 'Open your first customer account to start depositing, withdrawing, and transferring money.'
+                : 'Try a different search term or status filter, or open a new customer account.'
+            }
+            action={
+              <Button
+                size="sm"
+                onClick={() => {
+                  generateSampleAccNumber();
+                  setIsModalOpen(true);
+                }}
+              >
+                <PlusCircle className="h-4 w-4" aria-hidden="true" />
+                Open account
+              </Button>
+            }
+          />
+        </Card>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+        <div className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-3">
           {filteredAccounts.map((acc) => {
             const isSystem = acc.account_type === 'system';
-            return (
-              <div
-                key={acc.id}
-                className={`bg-slate-900 border rounded-2xl p-6 transition-all hover:border-slate-700 flex flex-col justify-between ${
-                  isSystem ? 'border-indigo-500/30' : 'border-slate-800'
-                }`}
-              >
-                <div>
-                  <div className="flex items-center justify-between mb-4">
-                    <div className="flex items-center gap-2">
-                      {isSystem ? (
-                        <Building className="w-4 h-4 text-indigo-400" />
-                      ) : (
-                        <Wallet className="w-4 h-4 text-teal-400" />
-                      )}
-                      <span className="text-xs font-mono font-bold text-slate-300 tracking-wider">
-                        {acc.account_number}
-                      </span>
-                    </div>
+            const typeLabel = isSystem
+              ? (acc.system_role_type || 'system vault').toLowerCase().replace(/_/g, ' ')
+              : 'customer ledger';
+            const copied = copiedId === acc.id;
 
-                    <span
-                      className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${
-                        acc.status === 'active'
-                          ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
-                          : acc.status === 'frozen'
-                          ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
-                          : 'bg-rose-500/10 text-rose-400 border border-rose-500/20'
-                      }`}
-                    >
-                      {acc.status}
-                    </span>
+            return (
+              <Card key={acc.id} className="flex flex-col">
+                <CardBody className="flex flex-1 flex-col">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex min-w-0 items-center gap-2">
+                      <span
+                        className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${
+                          isSystem ? 'bg-accent-soft text-accent' : 'bg-brand-soft text-brand'
+                        }`}
+                      >
+                        {isSystem ? (
+                          <Building className="h-4 w-4" aria-hidden="true" />
+                        ) : (
+                          <Wallet className="h-4 w-4" aria-hidden="true" />
+                        )}
+                      </span>
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-1.5">
+                          <span className="truncate font-mono text-xs font-semibold tracking-wide text-ink">
+                            {acc.account_number}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => copyAccountNumber(acc)}
+                            className="rounded p-1 text-slate-400 transition-colors hover:bg-slate-100 hover:text-ink"
+                            aria-label={`Copy account number ${acc.account_number}`}
+                            title="Copy account number"
+                          >
+                            {copied ? (
+                              <Check className="h-3 w-3 text-success" aria-hidden="true" />
+                            ) : (
+                              <Copy className="h-3 w-3" aria-hidden="true" />
+                            )}
+                          </button>
+                        </div>
+                        <div className="mt-1">
+                          <Badge variant={isSystem ? 'info' : 'neutral'} className="capitalize">
+                            {typeLabel}
+                          </Badge>
+                        </div>
+                      </div>
+                    </div>
+                    <AccountStatusBadge status={acc.status} />
                   </div>
 
-                  <div className="mb-4">
-                    <span className="text-[11px] uppercase tracking-wider text-slate-400 font-semibold block mb-1">
-                      Current Ledger Balance
-                    </span>
-                    <div className="text-2xl font-extrabold font-mono text-white">
+                  <div className="mt-4">
+                    <div className="text-[10px] font-semibold uppercase tracking-widest text-muted">
+                      Ledger balance
+                    </div>
+                    <div className="mt-1 text-2xl font-bold tracking-tight text-ink tabular-nums">
                       {paiseToRupees(acc.current_balance)}
                     </div>
                   </div>
 
-                  <div className="space-y-1.5 text-xs text-slate-400 pt-3 border-t border-slate-800">
-                    <div className="flex justify-between">
-                      <span>Type:</span>
-                      <span className="font-medium text-slate-200 capitalize">
-                        {acc.system_role_type || acc.account_type}
-                      </span>
+                  <dl className="mt-4 space-y-2 border-t border-line pt-3 text-xs">
+                    <div className="flex items-center justify-between gap-3">
+                      <dt className="text-muted">Currency</dt>
+                      <dd className="font-mono font-medium text-ink-soft">{acc.currency || 'INR'}</dd>
                     </div>
-                    <div className="flex justify-between">
-                      <span>Currency:</span>
-                      <span className="font-mono text-slate-200">{acc.currency || 'INR'}</span>
+                    <div className="flex items-center justify-between gap-3">
+                      <dt className="text-muted">Created</dt>
+                      <dd className="text-right font-medium text-ink-soft">{formatTimestamp(acc.created_at)}</dd>
                     </div>
-                    <div className="flex justify-between">
-                      <span>Created:</span>
-                      <span>{formatTimestamp(acc.created_at)}</span>
+                    <div className="flex items-center justify-between gap-3">
+                      <dt className="text-muted">Account ID</dt>
+                      <dd className="max-w-[55%] truncate font-mono text-[10px] text-slate-400" title={acc.id}>
+                        {acc.id}
+                      </dd>
                     </div>
-                  </div>
-                </div>
+                  </dl>
+                </CardBody>
 
-                <div className="mt-5 pt-4 border-t border-slate-800 flex items-center justify-between">
+                <CardFooter className="justify-between gap-2">
                   <Link
                     to={`/accounts/${acc.id}`}
-                    className="text-xs font-semibold text-teal-400 hover:text-teal-300 flex items-center gap-1 transition-colors"
+                    className="inline-flex items-center gap-1 text-xs font-semibold text-brand hover:underline"
                   >
-                    View Details & Statement <ExternalLink className="w-3.5 h-3.5" />
+                    Statement <ExternalLink className="h-3 w-3" aria-hidden="true" />
                   </Link>
 
-                  <Link
+                  <ButtonLink
                     to={`/operations?type=transfer&source=${acc.id}`}
-                    className="text-xs font-medium text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 px-2.5 py-1.5 rounded-lg transition-colors"
+                    variant="secondary"
+                    size="xs"
+                    className="gap-1.5"
                   >
+                    <ArrowLeftRight className="h-3 w-3" aria-hidden="true" />
                     Transfer
-                  </Link>
-                </div>
-              </div>
+                  </ButtonLink>
+                </CardFooter>
+              </Card>
             );
           })}
         </div>
       )}
 
-      {/* Create Account Modal */}
-      <Modal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} title="Open New Customer Account">
-        <form onSubmit={handleCreateAccount} className="space-y-4">
-          <div>
-            <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">
-              Account Number
-            </label>
+      <Modal
+        isOpen={isModalOpen}
+        onClose={closeModal}
+        title="Open new customer account"
+        footer={
+          <div className="flex items-center justify-end gap-2">
+            <Button type="button" variant="ghost" size="sm" onClick={closeModal}>
+              Cancel
+            </Button>
+            <Button type="submit" form="create-account-form" size="sm" loading={submitting}>
+              {submitting ? 'Creating…' : 'Create account'}
+            </Button>
+          </div>
+        }
+      >
+        <form id="create-account-form" onSubmit={handleCreateAccount} className="space-y-4">
+          <Field
+            label="Account number"
+            htmlFor="new-account-number"
+            hint="Initial status will be active with a zero balance."
+            required
+          >
             <div className="flex gap-2">
-              <input
+              <Input
+                id="new-account-number"
                 type="text"
                 value={newAccNumber}
-                onChange={(e) => setNewAccNumber(e.target.value)}
+                onChange={(event) => setNewAccNumber(event.target.value)}
                 placeholder="e.g. ACC-IN-83920194"
+                className="flex-1 font-mono"
                 required
-                className="flex-1 bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-teal-500 font-mono"
               />
-              <button
-                type="button"
-                onClick={generateSampleAccNumber}
-                className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-xs text-slate-300 rounded-xl transition-colors shrink-0"
-              >
-                Auto-Generate
-              </button>
+              <Button type="button" variant="secondary" size="md" onClick={generateSampleAccNumber} className="shrink-0">
+                Auto-generate
+              </Button>
             </div>
-            <p className="text-[11px] text-slate-500 mt-1">
-              Initial status will be active with initial balance ₹0.00.
-            </p>
-          </div>
+          </Field>
 
-          <div>
-            <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">
-              Currency
-            </label>
-            <select
+          <Field label="Currency" htmlFor="new-account-currency" required>
+            <Select
+              id="new-account-currency"
               value={newCurrency}
-              onChange={(e) => setNewCurrency(e.target.value)}
-              className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-teal-500"
+              onChange={(event) => setNewCurrency(event.target.value)}
             >
-              <option value="INR">INR (Indian Rupee - ₹)</option>
-            </select>
-          </div>
-
-          <div className="pt-4 border-t border-slate-800 flex justify-end gap-3">
-            <button
-              type="button"
-              onClick={() => setIsModalOpen(false)}
-              className="px-4 py-2 rounded-xl text-sm font-medium text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={submitting}
-              className="px-5 py-2.5 rounded-xl text-sm font-semibold text-white bg-teal-500 hover:bg-teal-600 disabled:opacity-50 transition-colors"
-            >
-              {submitting ? 'Creating...' : 'Create Account'}
-            </button>
-          </div>
+              <option value="INR">INR · Indian Rupee (₹)</option>
+            </Select>
+          </Field>
         </form>
       </Modal>
     </div>

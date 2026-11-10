@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { useAuth } from '../context/AuthContext';
 import * as api from '../services/api';
 import { paiseToRupees, formatTimestamp } from '../utils/formatters';
 import {
@@ -9,22 +8,50 @@ import {
   FileText,
   Users,
   Settings,
-  ChevronLeft,
-  ChevronRight,
   UserPlus,
-  Trash2,
   AlertTriangle,
   ArrowDownLeft,
   ArrowUpRight,
   RefreshCw,
   ExternalLink,
+  Search,
+  ShieldCheck,
+  Info,
 } from 'lucide-react';
 import Alert from '../components/Alert';
 import Modal from '../components/Modal';
+import {
+  AccountStatusBadge,
+  Badge,
+  Button,
+  ButtonLink,
+  Card,
+  CardBody,
+  CardFooter,
+  CardHeader,
+  EmptyState,
+  Field,
+  Input,
+  PageLoading,
+  Pagination,
+  Select,
+  TableSkeleton,
+  useToast,
+} from '../components/ui';
+
+const tabs = [
+  { id: 'statement', label: 'Statement', icon: FileText },
+  { id: 'settings', label: 'Settings & status', icon: Settings },
+  { id: 'memberships', label: 'Memberships', icon: Users },
+];
+
+function isCreditEntry(entry) {
+  return String(entry.entry_type || '').toLowerCase() === 'credit';
+}
 
 export default function AccountDetail() {
   const { id } = useParams();
-  const { user, isAdmin } = useAuth();
+  const toast = useToast();
 
   const [activeTab, setActiveTab] = useState('statement');
   const [account, setAccount] = useState(null);
@@ -32,14 +59,14 @@ export default function AccountDetail() {
   const [pagination, setPagination] = useState({ total: 0, limit: 15, offset: 0 });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [success, setSuccess] = useState(null);
 
-  // Status Change State
+  const [statementSearch, setStatementSearch] = useState('');
+  const [statementType, setStatementType] = useState('all');
+
   const [newStatus, setNewStatus] = useState('');
   const [statusReason, setStatusReason] = useState('');
   const [statusSubmitting, setStatusSubmitting] = useState(false);
 
-  // Member Assignment State
   const [isMemberModalOpen, setIsMemberModalOpen] = useState(false);
   const [memberUserId, setMemberUserId] = useState('');
   const [memberRole, setMemberRole] = useState('account_holder');
@@ -49,7 +76,6 @@ export default function AccountDetail() {
     setLoading(true);
     setError(null);
     try {
-      // 1. Fetch account statement (which also returns account details)
       const data = await api.getAccountStatement(id, {
         limit: pagination.limit,
         offset: pagination.offset,
@@ -66,6 +92,12 @@ export default function AccountDetail() {
   }, [id, pagination.limit, pagination.offset]);
 
   useEffect(() => {
+    setAccount(null);
+    setStatement([]);
+    setPagination((current) => ({ ...current, total: 0, offset: 0 }));
+  }, [id]);
+
+  useEffect(() => {
     loadData();
   }, [loadData]);
 
@@ -80,7 +112,7 @@ export default function AccountDetail() {
     setError(null);
     try {
       await api.updateAccountStatus(id, newStatus, statusReason.trim());
-      setSuccess(`Account status updated to ${newStatus}`);
+      toast.success(`Account status updated to ${newStatus}`);
       setStatusReason('');
       await loadData();
     } catch (err) {
@@ -101,7 +133,7 @@ export default function AccountDetail() {
     setError(null);
     try {
       await api.assignMembership(id, memberUserId.trim(), memberRole);
-      setSuccess(`Membership assigned successfully`);
+      toast.success('Membership assigned successfully');
       setIsMemberModalOpen(false);
       setMemberUserId('');
       await loadData();
@@ -112,383 +144,465 @@ export default function AccountDetail() {
     }
   }
 
-  async function handleRevokeMember(targetUserId) {
-    if (!window.confirm('Are you sure you want to revoke access for this user?')) {
-      return;
-    }
+  const filteredStatement = statement.filter((entry) => {
+    const query = statementSearch.trim().toLowerCase();
+    const matchesQuery =
+      !query ||
+      entry.transaction_id?.toLowerCase().includes(query) ||
+      entry.transaction_type?.toLowerCase().includes(query);
+    const entryType = String(entry.entry_type || '').toLowerCase();
+    const matchesType = statementType === 'all' || entryType === statementType;
+    return matchesQuery && matchesType;
+  });
 
-    setError(null);
-    try {
-      await api.revokeMembership(id, targetUserId);
-      setSuccess('Membership revoked successfully');
-      await loadData();
-    } catch (err) {
-      setError(err.message || 'Failed to revoke membership');
-    }
+  if (loading && !account) {
+    return <PageLoading label="Loading account details…" />;
   }
 
   return (
     <div className="space-y-6 animate-fadeIn">
-      {/* Back button & Title */}
-      <div className="flex items-center gap-3">
-        <Link
-          to="/accounts"
-          className="p-2 bg-slate-900 hover:bg-slate-800 border border-slate-800 rounded-xl text-slate-400 hover:text-white transition-colors"
-        >
-          <ArrowLeft className="w-4 h-4" />
-        </Link>
-        <div>
-          <h1 className="text-xl sm:text-2xl font-bold text-white tracking-tight">Account Overview</h1>
-          <p className="text-slate-400 text-xs font-mono">{id}</p>
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex items-start gap-3">
+          <Link
+            to="/accounts"
+            className="mt-0.5 inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-line bg-surface text-ink-soft shadow-sm transition-colors hover:bg-slate-50"
+            aria-label="Back to accounts"
+          >
+            <ArrowLeft className="h-4 w-4" aria-hidden="true" />
+          </Link>
+          <div className="min-w-0">
+            <p className="text-[11px] font-semibold uppercase tracking-widest text-muted">Account detail</p>
+            <h1 className="mt-0.5 truncate text-xl font-bold tracking-tight text-ink sm:text-2xl">
+              {account?.account_number || 'Account'}
+            </h1>
+            <p className="mt-1 truncate font-mono text-[11px] text-muted">{id}</p>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2 sm:justify-end">
+          <Button variant="secondary" size="sm" onClick={loadData} disabled={loading}>
+            <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin text-brand' : ''}`} aria-hidden="true" />
+            Refresh
+          </Button>
+          <ButtonLink to={`/operations?type=deposit&destination=${id}`} size="sm">
+            <ArrowDownLeft className="h-3.5 w-3.5" aria-hidden="true" />
+            Deposit
+          </ButtonLink>
         </div>
       </div>
 
       {error && <Alert type="error" message={error} onClose={() => setError(null)} />}
-      {success && <Alert type="success" message={success} onClose={() => setSuccess(null)} />}
 
-      {/* Account Info Card */}
       {account && (
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl relative overflow-hidden">
-          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-6">
-            <div>
-              <div className="flex items-center gap-3 mb-2">
-                <span className="text-xs font-mono font-bold text-teal-400 uppercase tracking-wider">
-                  {account.account_number}
-                </span>
-                <span
-                  className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${
-                    account.status === 'active'
-                      ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
-                      : account.status === 'frozen'
-                      ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
-                      : 'bg-rose-500/10 text-rose-400 border border-rose-500/20'
-                  }`}
-                >
-                  {account.status}
-                </span>
-              </div>
-              <div className="text-3xl sm:text-4xl font-extrabold font-mono text-white tracking-tight">
-                {paiseToRupees(account.current_balance)}
-              </div>
-              <p className="text-xs text-slate-400 mt-1">
-                Settled currency: <strong className="text-slate-200">{account.currency}</strong> • Type:{' '}
-                <strong className="text-slate-200 capitalize">{account.account_type}</strong>
-              </p>
-            </div>
+        <Card className="relative overflow-hidden">
+          <div
+            className="pointer-events-none absolute inset-x-0 top-0 h-24 opacity-70"
+            style={{
+              background:
+                'radial-gradient(420px circle at 10% 0%, rgba(15,118,110,0.10), transparent 70%), radial-gradient(420px circle at 90% 0%, rgba(37,99,235,0.08), transparent 70%)',
+            }}
+            aria-hidden="true"
+          />
+          <CardBody className="relative">
+            <div className="flex flex-col gap-6 lg:flex-row lg:items-start lg:justify-between">
+              <div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-brand-soft text-brand">
+                    <Wallet className="h-4 w-4" aria-hidden="true" />
+                  </span>
+                  <span className="font-mono text-sm font-semibold tracking-wide text-ink">
+                    {account.account_number}
+                  </span>
+                  <AccountStatusBadge status={account.status} />
+                  <Badge variant={account.account_type === 'system' ? 'info' : 'neutral'} className="capitalize">
+                    {account.account_type === 'system'
+                      ? (account.system_role_type || 'system vault').toLowerCase().replace(/_/g, ' ')
+                      : 'customer ledger'}
+                  </Badge>
+                </div>
 
-            <div className="flex flex-wrap items-center gap-2">
-              <Link
-                to={`/operations?type=deposit&destination=${id}`}
-                className="px-4 py-2 bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/30 text-emerald-300 rounded-xl text-xs font-bold transition-colors flex items-center gap-1.5"
-              >
-                <ArrowDownLeft className="w-4 h-4" />
-                Deposit
-              </Link>
-              <Link
-                to={`/operations?type=withdraw&source=${id}`}
-                className="px-4 py-2 bg-amber-600/20 hover:bg-amber-600/30 border border-amber-500/30 text-amber-300 rounded-xl text-xs font-bold transition-colors flex items-center gap-1.5"
-              >
-                <ArrowUpRight className="w-4 h-4" />
-                Withdraw
-              </Link>
-              <Link
-                to={`/operations?type=transfer&source=${id}`}
-                className="px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white rounded-xl text-xs font-bold transition-colors flex items-center gap-1.5"
-              >
-                Transfer
-              </Link>
+                <div className="mt-5">
+                  <div className="text-[10px] font-semibold uppercase tracking-widest text-muted">
+                    Current ledger balance
+                  </div>
+                  <div className="mt-1 text-3xl font-bold tracking-tight text-ink tabular-nums sm:text-4xl">
+                    {paiseToRupees(account.current_balance)}
+                  </div>
+                </div>
+
+                <dl className="mt-5 grid grid-cols-1 gap-x-8 gap-y-2 text-xs sm:grid-cols-2 lg:grid-cols-3">
+                  <div className="flex items-center justify-between gap-3 border-b border-line pb-2">
+                    <dt className="text-muted">Currency</dt>
+                    <dd className="font-mono font-medium text-ink-soft">{account.currency || 'INR'}</dd>
+                  </div>
+                  <div className="flex items-center justify-between gap-3 border-b border-line pb-2">
+                    <dt className="text-muted">Account type</dt>
+                    <dd className="font-medium capitalize text-ink-soft">{account.account_type}</dd>
+                  </div>
+                  <div className="flex items-center justify-between gap-3 border-b border-line pb-2">
+                    <dt className="text-muted">Opened</dt>
+                    <dd className="text-right font-medium text-ink-soft">{formatTimestamp(account.created_at)}</dd>
+                  </div>
+                </dl>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2 lg:flex-col lg:items-stretch">
+                <ButtonLink to={`/operations?type=deposit&destination=${id}`} variant="success" size="sm">
+                  <ArrowDownLeft className="h-3.5 w-3.5" aria-hidden="true" />
+                  Deposit
+                </ButtonLink>
+                <ButtonLink to={`/operations?type=withdraw&source=${id}`} variant="secondary" size="sm">
+                  <ArrowUpRight className="h-3.5 w-3.5" aria-hidden="true" />
+                  Withdraw
+                </ButtonLink>
+                <ButtonLink to={`/operations?type=transfer&source=${id}`} variant="secondary" size="sm">
+                  Transfer
+                </ButtonLink>
+              </div>
             </div>
-          </div>
-        </div>
+          </CardBody>
+        </Card>
       )}
 
-      {/* Tabs */}
-      <div className="flex border-b border-slate-800 space-x-1">
-        <button
-          onClick={() => setActiveTab('statement')}
-          className={`px-4 py-3 text-sm font-semibold border-b-2 flex items-center gap-2 transition-colors ${
-            activeTab === 'statement'
-              ? 'border-teal-500 text-teal-400'
-              : 'border-transparent text-slate-400 hover:text-slate-200'
-          }`}
-        >
-          <FileText className="w-4 h-4" />
-          Statement & Ledger
-        </button>
-
-        <button
-          onClick={() => setActiveTab('settings')}
-          className={`px-4 py-3 text-sm font-semibold border-b-2 flex items-center gap-2 transition-colors ${
-            activeTab === 'settings'
-              ? 'border-teal-500 text-teal-400'
-              : 'border-transparent text-slate-400 hover:text-slate-200'
-          }`}
-        >
-          <Settings className="w-4 h-4" />
-          Settings & Status
-        </button>
-
-        <button
-          onClick={() => setActiveTab('memberships')}
-          className={`px-4 py-3 text-sm font-semibold border-b-2 flex items-center gap-2 transition-colors ${
-            activeTab === 'memberships'
-              ? 'border-teal-500 text-teal-400'
-              : 'border-transparent text-slate-400 hover:text-slate-200'
-          }`}
-        >
-          <Users className="w-4 h-4" />
-          Memberships & Access
-        </button>
+      <div className="flex gap-1 overflow-x-auto border-b border-line" role="tablist" aria-label="Account sections">
+        {tabs.map(({ id: tabId, label, icon: Icon }) => (
+          <button
+            key={tabId}
+            type="button"
+            role="tab"
+            aria-selected={activeTab === tabId}
+            onClick={() => setActiveTab(tabId)}
+            className={`inline-flex shrink-0 items-center gap-2 border-b-2 px-3 py-2.5 text-sm font-semibold transition-colors ${
+              activeTab === tabId
+                ? 'border-brand text-brand'
+                : 'border-transparent text-muted hover:text-ink'
+            }`}
+          >
+            <Icon className="h-4 w-4" aria-hidden="true" />
+            {label}
+          </button>
+        ))}
       </div>
 
-      {/* TAB 1: Statement */}
       {activeTab === 'statement' && (
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-xl space-y-4">
-          <div className="px-6 py-4 border-b border-slate-800 flex items-center justify-between">
-            <h3 className="text-sm font-bold text-white uppercase tracking-wider">
-              Chronological Ledger Postings ({pagination.total} total)
-            </h3>
-            <button
-              onClick={loadData}
-              className="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800"
-              title="Refresh"
-            >
-              <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
-            </button>
-          </div>
+        <Card className="overflow-hidden">
+          <CardHeader className="flex-col items-start gap-3 sm:flex-row sm:items-center">
+            <div>
+              <h2 className="text-sm font-semibold text-ink">Ledger statement</h2>
+              <p className="mt-0.5 text-xs text-muted">
+                Chronological postings · {pagination.total} {pagination.total === 1 ? 'entry' : 'entries'}
+              </p>
+            </div>
+            <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
+              <div className="relative sm:w-56">
+                <Search
+                  className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400"
+                  aria-hidden="true"
+                />
+                <Input
+                  type="text"
+                  value={statementSearch}
+                  onChange={(event) => setStatementSearch(event.target.value)}
+                  placeholder="Transaction ID or type…"
+                  className="pl-9"
+                  aria-label="Filter statement entries"
+                />
+              </div>
+              <div className="sm:w-36">
+                <Select
+                  value={statementType}
+                  onChange={(event) => setStatementType(event.target.value)}
+                  aria-label="Filter statement by entry type"
+                >
+                  <option value="all">All entries</option>
+                  <option value="credit">Credits</option>
+                  <option value="debit">Debits</option>
+                </Select>
+              </div>
+            </div>
+          </CardHeader>
 
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs">
-              <thead className="bg-slate-950/60 text-slate-400 font-semibold border-b border-slate-800">
-                <tr>
-                  <th className="px-6 py-3">Seq #</th>
-                  <th className="px-6 py-3">Timestamp</th>
-                  <th className="px-6 py-3">Type</th>
-                  <th className="px-6 py-3">Transaction</th>
-                  <th className="px-6 py-3 text-right">Posting Amount</th>
-                  <th className="px-6 py-3 text-right">Running Balance</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-800">
-                {statement.length === 0 ? (
-                  <tr>
-                    <td colSpan={6} className="px-6 py-8 text-center text-slate-500">
-                      No postings recorded on this ledger yet.
-                    </td>
-                  </tr>
-                ) : (
-                  statement.map((entry) => {
-                    const isCredit = entry.entry_type === 'credit';
-                    return (
-                      <tr key={entry.id} className="hover:bg-slate-800/40 transition-colors font-mono">
-                        <td className="px-6 py-3 text-slate-400">{entry.sequence_number}</td>
-                        <td className="px-6 py-3 text-slate-400 whitespace-nowrap">
-                          {formatTimestamp(entry.created_at)}
-                        </td>
-                        <td className="px-6 py-3">
-                          <span
-                            className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${
-                              isCredit
-                                ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
-                                : 'bg-rose-500/10 text-rose-400 border border-rose-500/20'
+          {loading ? (
+            <TableSkeleton rows={6} />
+          ) : statement.length === 0 ? (
+            <EmptyState
+              icon={FileText}
+              title="No postings yet"
+              description="This ledger has no recorded postings. Deposits, withdrawals, and transfers will appear here."
+              action={
+                <ButtonLink to={`/operations?type=deposit&destination=${id}`} size="sm">
+                  <ArrowDownLeft className="h-4 w-4" aria-hidden="true" />
+                  Make a deposit
+                </ButtonLink>
+              }
+            />
+          ) : filteredStatement.length === 0 ? (
+            <EmptyState
+              icon={Search}
+              title="No matching entries on this page"
+              description="Try a different transaction ID, transaction type, or entry type. Filters apply to the current page."
+            />
+          ) : (
+            <>
+              <div className="hidden overflow-x-auto md:block">
+                <table className="w-full text-left text-xs">
+                  <thead className="border-b border-line bg-slate-50/80 text-[10px] font-semibold uppercase tracking-widest text-muted">
+                    <tr>
+                      <th className="px-5 py-3">Seq</th>
+                      <th className="px-5 py-3">Timestamp</th>
+                      <th className="px-5 py-3">Entry</th>
+                      <th className="px-5 py-3">Transaction</th>
+                      <th className="px-5 py-3 text-right">Amount</th>
+                      <th className="px-5 py-3 text-right">Running balance</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-line">
+                    {filteredStatement.map((entry) => {
+                      const credit = isCreditEntry(entry);
+                      return (
+                        <tr key={entry.id} className="transition-colors hover:bg-slate-50">
+                          <td className="px-5 py-3 font-mono text-muted">{entry.sequence_number}</td>
+                          <td className="whitespace-nowrap px-5 py-3 text-muted">
+                            {formatTimestamp(entry.created_at)}
+                          </td>
+                          <td className="px-5 py-3">
+                            <Badge variant={credit ? 'success' : 'danger'} className="uppercase">
+                              {entry.entry_type}
+                            </Badge>
+                          </td>
+                          <td className="px-5 py-3">
+                            <Link
+                              to={`/transactions/${entry.transaction_id}`}
+                              className="inline-flex max-w-[180px] items-center gap-1 font-mono text-brand hover:underline"
+                              title={entry.transaction_id}
+                            >
+                              <span className="truncate">{entry.transaction_id}</span>
+                              <ExternalLink className="h-3 w-3 shrink-0" aria-hidden="true" />
+                            </Link>
+                          </td>
+                          <td
+                            className={`px-5 py-3 text-right font-semibold tabular-nums ${
+                              credit ? 'text-success' : 'text-danger'
                             }`}
                           >
-                            {entry.entry_type}
-                          </span>
-                        </td>
-                        <td className="px-6 py-3">
-                          <Link
-                            to={`/transactions/${entry.transaction_id}`}
-                            className="text-teal-400 hover:underline flex items-center gap-1"
+                            {credit ? '+' : '−'}
+                            {paiseToRupees(entry.amount_paise)}
+                          </td>
+                          <td className="px-5 py-3 text-right font-semibold text-ink tabular-nums">
+                            {paiseToRupees(entry.running_balance_paise)}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+
+              <ul className="divide-y divide-line md:hidden">
+                {filteredStatement.map((entry) => {
+                  const credit = isCreditEntry(entry);
+                  return (
+                    <li key={entry.id} className="px-4 py-3">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex items-start gap-2.5">
+                          <span
+                            className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${
+                              credit ? 'bg-success-soft text-success' : 'bg-danger-soft text-danger'
+                            }`}
                           >
-                            <span className="truncate max-w-[120px]">{entry.transaction_id}</span>
-                            <ExternalLink className="w-3 h-3 shrink-0" />
-                          </Link>
-                        </td>
-                        <td
-                          className={`px-6 py-3 text-right font-bold ${
-                            isCredit ? 'text-emerald-400' : 'text-rose-400'
-                          }`}
-                        >
-                          {isCredit ? '+' : '-'}
-                          {paiseToRupees(entry.amount_paise)}
-                        </td>
-                        <td className="px-6 py-3 text-right text-slate-200 font-bold">
-                          {paiseToRupees(entry.running_balance_paise)}
-                        </td>
-                      </tr>
-                    );
-                  })
-                )}
-              </tbody>
-            </table>
-          </div>
-
-          {/* Pagination Controls */}
-          {pagination.total > pagination.limit && (
-            <div className="px-6 py-4 border-t border-slate-800 flex items-center justify-between text-xs text-slate-400">
-              <div>
-                Showing {pagination.offset + 1} to{' '}
-                {Math.min(pagination.offset + pagination.limit, pagination.total)} of {pagination.total} entries
-              </div>
-              <div className="flex gap-2">
-                <button
-                  disabled={pagination.offset === 0}
-                  onClick={() =>
-                    setPagination((p) => ({ ...p, offset: Math.max(0, p.offset - p.limit) }))
-                  }
-                  className="px-3 py-1.5 rounded-lg border border-slate-800 bg-slate-900 hover:bg-slate-800 disabled:opacity-40 disabled:pointer-events-none transition-colors flex items-center gap-1"
-                >
-                  <ChevronLeft className="w-3.5 h-3.5" /> Previous
-                </button>
-                <button
-                  disabled={pagination.offset + pagination.limit >= pagination.total}
-                  onClick={() =>
-                    setPagination((p) => ({ ...p, offset: p.offset + p.limit }))
-                  }
-                  className="px-3 py-1.5 rounded-lg border border-slate-800 bg-slate-900 hover:bg-slate-800 disabled:opacity-40 disabled:pointer-events-none transition-colors flex items-center gap-1"
-                >
-                  Next <ChevronRight className="w-3.5 h-3.5" />
-                </button>
-              </div>
-            </div>
+                            {credit ? (
+                              <ArrowDownLeft className="h-4 w-4" aria-hidden="true" />
+                            ) : (
+                              <ArrowUpRight className="h-4 w-4" aria-hidden="true" />
+                            )}
+                          </span>
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-2">
+                              <Badge variant={credit ? 'success' : 'danger'} className="uppercase">
+                                {entry.entry_type}
+                              </Badge>
+                              <span className="text-[10px] font-mono text-muted">#{entry.sequence_number}</span>
+                            </div>
+                            <div className="mt-1 text-[11px] capitalize text-ink-soft">
+                              {entry.transaction_type || 'transaction'}
+                            </div>
+                            <div className="text-[10px] text-slate-400">{formatTimestamp(entry.created_at)}</div>
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <div
+                            className={`text-sm font-bold tabular-nums ${
+                              credit ? 'text-success' : 'text-danger'
+                            }`}
+                          >
+                            {credit ? '+' : '−'}
+                            {paiseToRupees(entry.amount_paise)}
+                          </div>
+                          <div className="mt-0.5 text-[10px] text-muted tabular-nums">
+                            Bal {paiseToRupees(entry.running_balance_paise)}
+                          </div>
+                        </div>
+                      </div>
+                      <Link
+                        to={`/transactions/${entry.transaction_id}`}
+                        className="mt-2 inline-flex max-w-full items-center gap-1 font-mono text-[10px] text-brand hover:underline"
+                      >
+                        <span className="truncate">{entry.transaction_id}</span>
+                        <ExternalLink className="h-3 w-3 shrink-0" aria-hidden="true" />
+                      </Link>
+                    </li>
+                  );
+                })}
+              </ul>
+            </>
           )}
-        </div>
+
+          <Pagination
+            total={pagination.total}
+            limit={pagination.limit}
+            offset={pagination.offset}
+            onChange={(offset) => setPagination((current) => ({ ...current, offset }))}
+            label="postings"
+          />
+        </Card>
       )}
 
-      {/* TAB 2: Settings & Status */}
       {activeTab === 'settings' && (
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl max-w-2xl space-y-6">
-          <div>
-            <h3 className="text-base font-bold text-white mb-1">Account Operational Status</h3>
-            <p className="text-xs text-slate-400">
-              Frozen accounts reject debits and credits immediately at the financial engine level.
-            </p>
-          </div>
-
-          <form onSubmit={handleStatusChange} className="space-y-4">
+        <Card className="max-w-2xl">
+          <CardHeader>
             <div>
-              <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">
-                Target Status
-              </label>
-              <select
-                value={newStatus}
-                onChange={(e) => setNewStatus(e.target.value)}
-                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-teal-500"
-              >
-                <option value="active">Active (Normal Operations)</option>
-                <option value="frozen">Frozen (Lock all movements)</option>
-                <option value="closed">Closed (Terminal state)</option>
-              </select>
+              <h2 className="text-sm font-semibold text-ink">Account operational status</h2>
+              <p className="mt-0.5 text-xs text-muted">
+                Frozen accounts reject debits and credits immediately at the financial engine level.
+              </p>
             </div>
-
-            <div>
-              <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">
-                Reason for Change (Audit Tracked)
-              </label>
-              <input
-                type="text"
-                value={statusReason}
-                onChange={(e) => setStatusReason(e.target.value)}
-                placeholder="e.g. Risk compliance hold, user request"
-                required
-                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-teal-500"
-              />
-            </div>
-
-            <button
-              type="submit"
-              disabled={statusSubmitting}
-              className="py-2.5 px-5 rounded-xl font-semibold text-sm text-white bg-teal-500 hover:bg-teal-600 disabled:opacity-50 transition-colors"
-            >
-              {statusSubmitting ? 'Updating...' : 'Save Account Status'}
-            </button>
-          </form>
-        </div>
-      )}
-
-      {/* TAB 3: Memberships */}
-      {activeTab === 'memberships' && (
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <h3 className="text-base font-bold text-white mb-1">Account Members & Roles</h3>
-              <p className="text-xs text-slate-400">
-                Authorized account holders can initiate transactions; auditors have read-only access.
+          </CardHeader>
+          <CardBody className="space-y-5">
+            <div className="flex items-start gap-3 rounded-lg border border-amber-200 bg-warning-soft/60 p-3 text-xs text-amber-900">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warning" aria-hidden="true" />
+              <p className="leading-relaxed">
+                Status changes are audit tracked and require a reason. Closing an account is terminal and cannot
+                be reversed.
               </p>
             </div>
 
-            <button
-              onClick={() => setIsMemberModalOpen(true)}
-              className="px-4 py-2 rounded-xl text-xs font-bold text-white bg-teal-500 hover:bg-teal-600 transition-colors flex items-center gap-1.5"
-            >
-              <UserPlus className="w-4 h-4" />
-              Add Member
-            </button>
-          </div>
+            <form onSubmit={handleStatusChange} className="space-y-4">
+              <Field label="Target status" htmlFor="account-status" required>
+                <Select
+                  id="account-status"
+                  value={newStatus}
+                  onChange={(event) => setNewStatus(event.target.value)}
+                >
+                  <option value="active">Active · normal operations</option>
+                  <option value="frozen">Frozen · lock all movements</option>
+                  <option value="closed">Closed · terminal state</option>
+                </Select>
+              </Field>
 
-          <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-4 text-xs text-slate-400 flex items-start gap-3">
-            <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
-            <div>
-              <strong>Integrity Guard:</strong> An account must always retain at least one active{' '}
-              <code className="text-teal-400 font-mono">account_holder</code>. Serialized database triggers
-              prevent concurrent revocation of the last holder.
-            </div>
-          </div>
-        </div>
+              <Field
+                label="Reason for change"
+                htmlFor="account-status-reason"
+                hint="Recorded in the audit trail."
+                required
+              >
+                <Input
+                  id="account-status-reason"
+                  type="text"
+                  value={statusReason}
+                  onChange={(event) => setStatusReason(event.target.value)}
+                  placeholder="e.g. Risk compliance hold, customer request"
+                  required
+                />
+              </Field>
+
+              <div className="flex justify-end">
+                <Button type="submit" loading={statusSubmitting}>
+                  {statusSubmitting ? 'Updating…' : 'Save account status'}
+                </Button>
+              </div>
+            </form>
+          </CardBody>
+        </Card>
       )}
 
-      {/* Add Member Modal */}
+      {activeTab === 'memberships' && (
+        <Card>
+          <CardHeader className="items-center">
+            <div>
+              <h2 className="text-sm font-semibold text-ink">Account members &amp; roles</h2>
+              <p className="mt-0.5 text-xs text-muted">
+                Account holders can initiate transactions; auditors have read-only statement access.
+              </p>
+            </div>
+            <Button size="sm" onClick={() => setIsMemberModalOpen(true)}>
+              <UserPlus className="h-3.5 w-3.5" aria-hidden="true" />
+              Add member
+            </Button>
+          </CardHeader>
+
+          <CardBody className="space-y-4">
+            <div className="flex items-start gap-3 rounded-lg border border-blue-200 bg-accent-soft/60 p-3 text-xs text-blue-900">
+              <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-accent" aria-hidden="true" />
+              <div>
+                <p className="font-semibold">Integrity guard</p>
+                <p className="mt-0.5 leading-relaxed">
+                  An account must always retain at least one active <code className="font-mono">account_holder</code>.
+                  Serialized database triggers prevent concurrent revocation of the last holder.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-start gap-3 rounded-lg border border-line bg-slate-50 p-3 text-xs text-muted">
+              <Info className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" aria-hidden="true" />
+              <p className="leading-relaxed">
+                Membership listing is not exposed by the current API. Assign access using the member&apos;s user
+                UUID; access changes take effect immediately.
+              </p>
+            </div>
+          </CardBody>
+
+          <CardFooter>
+            <p className="text-[11px] text-muted">
+              Authorized access is enforced by row-level security on every account and ledger read.
+            </p>
+          </CardFooter>
+        </Card>
+      )}
+
       <Modal
         isOpen={isMemberModalOpen}
         onClose={() => setIsMemberModalOpen(false)}
-        title="Assign Account Membership"
+        title="Assign account membership"
+        footer={
+          <div className="flex items-center justify-end gap-2">
+            <Button type="button" variant="ghost" size="sm" onClick={() => setIsMemberModalOpen(false)}>
+              Cancel
+            </Button>
+            <Button type="submit" form="assign-member-form" size="sm" loading={memberSubmitting}>
+              {memberSubmitting ? 'Assigning…' : 'Assign membership'}
+            </Button>
+          </div>
+        }
       >
-        <form onSubmit={handleAssignMember} className="space-y-4">
-          <div>
-            <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">
-              Target User UUID
-            </label>
-            <input
+        <form id="assign-member-form" onSubmit={handleAssignMember} className="space-y-4">
+          <Field label="Target user UUID" htmlFor="member-user-id" required>
+            <Input
+              id="member-user-id"
               type="text"
               value={memberUserId}
-              onChange={(e) => setMemberUserId(e.target.value)}
+              onChange={(event) => setMemberUserId(event.target.value)}
               placeholder="00000000-0000-0000-0000-000000000000"
+              className="font-mono"
               required
-              className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-teal-500 font-mono"
             />
-          </div>
+          </Field>
 
-          <div>
-            <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">
-              Membership Role
-            </label>
-            <select
-              value={memberRole}
-              onChange={(e) => setMemberRole(e.target.value)}
-              className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-teal-500"
-            >
-              <option value="account_holder">Account Holder (Full transaction execution)</option>
-              <option value="auditor">Auditor (Read-only ledger statement access)</option>
-            </select>
-          </div>
-
-          <div className="pt-4 border-t border-slate-800 flex justify-end gap-3">
-            <button
-              type="button"
-              onClick={() => setIsMemberModalOpen(false)}
-              className="px-4 py-2 rounded-xl text-sm font-medium text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={memberSubmitting}
-              className="px-5 py-2.5 rounded-xl text-sm font-semibold text-white bg-teal-500 hover:bg-teal-600 disabled:opacity-50 transition-colors"
-            >
-              {memberSubmitting ? 'Assigning...' : 'Assign Membership'}
-            </button>
-          </div>
+          <Field label="Membership role" htmlFor="member-role" required>
+            <Select id="member-role" value={memberRole} onChange={(event) => setMemberRole(event.target.value)}>
+              <option value="account_holder">Account holder · full transaction execution</option>
+              <option value="auditor">Auditor · read-only statement access</option>
+            </Select>
+          </Field>
         </form>
       </Modal>
     </div>
