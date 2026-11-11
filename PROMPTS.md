@@ -236,3 +236,52 @@ This document records the genuine prompt history and development requests execut
 - **Timestamp**: 2026-11-09T14:44:58+05:30
 - **Request Summary**: Fix CI test runner discovery syntax across Linux and Windows (`node --env-file=.env.test --test` and `node --test`), correct documentation overclaims regarding floating-point arithmetic in core calculations, preserve database isolation guards (`ledgerline_test` mandatory), verify 103 tests and client production build, commit as `ci: make GitHub Actions test discovery portable`, push normally without force flags, and verify actual remote GitHub Actions execution to completion.
 - **Outcome**: Switched server and client test runner commands to platform-agnostic native Node.js test discovery; updated documentation to avoid absolute floating-point claims; confirmed 103/103 tests passing locally and clean production build; committed as `ci: make GitHub Actions test discovery portable`; pushed to `origin/main`; verified matching GitHub Actions run.
+
+---
+
+### Manual Change 1 (UI/UX Redesign, Theme System, Node 24 Baseline & Vercel/Render Cloud Setup)
+- **Timestamp**: 2026-11-10T22:40:04+05:30 (`02ad5e8`) & 2026-11-11T18:00:30+05:30 (`0a4a64a`)
+- **Maintainer**: `chEkshith` (Direct manual changes & cloud deployment actions)
+- **Changes Made**:
+  1. **Frontend UI & Theme Overhaul (`02ad5e8`)**: Redesigned the public landing experience (`client/src/pages/Landing.jsx`, `client/src/components/landing/*`), introduced shared UI primitives (`client/src/components/ui/*`), `AuthLayout.jsx`, and `ThemeToggle.jsx`, added pre-paint theme initialization & updated metadata in `client/index.html`, updated Tailwind CSS v4 tokens (`client/src/index.css`), and refreshed `Dashboard`, `Accounts`, `AccountDetail`, `Operations`, `TransactionDetail`, `Admin`, `Health`, `Login`, and `Register`.
+  2. **Runtime Engine Alignment (`02ad5e8`)**: Added `"engines": { "node": "24.x" }` across root `package.json`, `server/package.json`, and `client/package.json`, and updated `.github/workflows/ci.yml` from Node.js 20 to Node.js 24.
+  3. **Vercel SPA Routing (`0a4a64a`)**: Created `client/vercel.json` with rewrite `/(.*)` $\to$ `/index.html` to support React Router deep links on Vercel.
+  4. **Live Hosting Provisioning**: Manually provisioned and connected the deployed stack across Vercel (`https://ledgerline-core.vercel.app`), Render (`https://ledgerline-api-gxy5.onrender.com`), and Neon managed PostgreSQL (`ledgerline_prod`), configuring `VITE_API_BASE_URL`, `CLIENT_ORIGIN`, and runtime secrets out of version control.
+
+---
+
+### Prompt 18 (Deployment Documentation Authoring, Formatting & Production Verification Audits)
+- **Timestamp**: 2026-11-11
+- **Request Summary**: Repair Markdown formatting defects in the draft deployment guide (`deployment_flow.md`) without modifying application code; revise verification procedures so state-mutating financial smoke tests execute strictly in staging while production uses non-mutating health probes; preserve open security notices (`sessionStorage` XSS trade-off, external rate-limiting gate, `/api/health` error detail disclosure) and safe secret-generation guidance.
+- **Outcome**: Completed accuracy and operational safety audits on `deployment_flow.md` prior to its removal in commit `86828a2`.
+
+---
+
+### Prompt 19 (Dev Secret Generation, DB_SSL=true TLS Hardening & Read-Only Render Verification)
+- **Timestamp**: 2026-11-11
+- **Request Summary**: Generate a dev-only `JWT_SECRET` configuration example; inspect `server/scripts/migrate.js`, `server/scripts/bootstrap.js`, `server/scripts/verify_install.js`, and shared pool settings for external PostgreSQL TLS support; implement explicit `DB_SSL=true` with strict certificate validation (`{ rejectUnauthorized: true }`, rejecting insecure bypasses); add SSL tests (`server/test/dbSsl.test.js`); and implement a read-only external PostgreSQL TLS connection preflight (`server/scripts/test_render_connection.js`) targeting `ledgerline_prod`.
+- **Outcome**: Implemented shared TLS helpers in `server/src/config/dbConfig.js` across `db.js`, `env.js`, `migrate.js`, `bootstrap.js`, and `verify_install.js`; added `9` unit/config tests in `server/test/dbSsl.test.js` proving `DB_SSL=true` enforcement and `PGSSLMODE=no-verify` resistance; created `server/scripts/test_render_connection.js`.
+
+---
+
+### Manual Change 2 (Environment Templates, Local/Cloud Env Configuration, Test Wiring & Deployment Cleanup)
+- **Timestamp**: 2026-11-11T22:52:55+05:30 (`8b6a32d`) & 2026-11-11T23:52:12+05:30 (`86828a2`)
+- **Maintainer**: `chEkshith` (Direct manual edits & environment provisioning)
+- **Changes Made**:
+  1. **Environment Templates & Pool Helper Wiring (`8b6a32d`)**: Added `DB_SSL=false` template entry to `.env.example` and `server/.env.example`, wired `buildAdminDbConfig(env)` in `server/test/phase2.test.js`, and committed `dbConfig.js`, `dbSsl.test.js`, `test_render_connection.js`, and TLS script updates (`8b6a32d`).
+  2. **Out-of-Band Environment & Live DB Configuration**: Manually configured untracked local `server/.env` and Render/Neon/Vercel runtime environment variables (`DB_SSL=true` in cloud, `ledgerline_app` runtime role separation, external migrations/bootstrap execution).
+  3. **Guide Consolidation (`86828a2`)**: Retired standalone `deployment_flow.md` from version control and updated `README.md` for live production view.
+
+---
+
+### Prompt 20 (Comprehensive Presentation-Ready README.md Overhaul)
+- **Timestamp**: 2026-11-11
+- **Request Summary**: Update the Tech Stack section first, then rewrite `README.md` into a complete 16-section repository guide covering Project Overview, Live Deployment (Vercel/Render/Neon with Render cold-start note), Features, Technology Stack, System Architecture & Financial Transaction Mermaid Diagrams, Database Schema & ER Diagram, Security Architecture distinguishing implemented controls vs planned improvements, API Documentation from Express routes, Project Structure, Local Setup from `.env.example`, Testing & CI/CD (`112` tests), Deployment Architecture, 5-minute Demo Walkthrough, Limitations & Future Enhancements, and Author Attribution.
+- **Outcome**: Rewrote `README.md` against verified routes, migrations `001`–`009`, security boundaries, existing documentation (`docs/DEPLOYMENT.md`, `docs/API.md`, `docs/ARCHITECTURE.md`, `THREATS.md`), and actual file paths (`client/src/utils/formatters.js`).
+
+---
+
+### Prompt 21 (Synchronizing PROMPTS.md & THREATS.md Including Manual Changes)
+- **Timestamp**: 2026-11-12T00:04:08+05:30
+- **Request Summary**: Update `PROMPTS.md` and `THREATS.md` to reflect current codebase architecture, SQL/procedure symbols, transport TLS controls, deployment boundaries, and explicitly include the maintainer's manual commits and configuration edits (`02ad5e8`, `0a4a64a`, `8b6a32d`, `86828a2`, live Vercel/Render/Neon hosting setup, and env updates).
+- **Outcome**: Reconciled `THREATS.md` against live source/migrations (fixing stale schema/validation references, adding Scenario 18 for `DB_SSL=true` TLS enforcement, and updating summary posture to `112` tests) and updated `PROMPTS.md` with chronological Prompt + Manual Change entries.
