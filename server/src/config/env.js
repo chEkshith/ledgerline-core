@@ -1,6 +1,7 @@
 import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { parseDbSsl } from './dbConfig.js';
 
 // Load .env relative to server root
 const __filename = fileURLToPath(import.meta.url);
@@ -42,6 +43,8 @@ if (NODE_ENV === 'production') {
   }
 }
 
+const dbSsl = parseDbSsl(process.env.DB_SSL);
+
 export const env = {
   NODE_ENV,
   PORT: parseInt(process.env.PORT, 10) || 5000,
@@ -53,6 +56,7 @@ export const env = {
   DB_NAME: process.env.DB_NAME || 'ledgerline_dev',
   DB_USER: process.env.DB_USER || 'ledgerline_app',
   DB_PASSWORD: process.env.DB_PASSWORD || '',
+  DB_SSL: dbSsl,
   DB_POOL_MAX: parseInt(process.env.DB_POOL_MAX, 10) || 20,
   DB_IDLE_TIMEOUT_MS: parseInt(process.env.DB_IDLE_TIMEOUT_MS, 10) || 30000,
   DB_CONNECTION_TIMEOUT_MS: parseInt(process.env.DB_CONNECTION_TIMEOUT_MS, 10) || 2000,

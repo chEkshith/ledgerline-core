@@ -4,6 +4,7 @@ import pkg from 'pg';
 const { Client } = pkg;
 import { pool, query } from '../src/config/db.js';
 import { env } from '../src/config/env.js';
+import { buildAdminDbConfig } from '../src/config/dbConfig.js';
 import { registerCustomer, login, setUserStatus } from '../src/services/auth.service.js';
 import {
   createCustomerAccount,
@@ -107,19 +108,13 @@ describe('LedgerLine Phase 2 Comprehensive Test Suite', () => {
     await assignMembership(adminUser.id, 'admin', accountA, auditorUser.id, 'auditor');
 
     // 5. Connect privileged admin client for test-only trigger verification
-    adminClient = new Client({
-      host: env.DB_HOST,
-      port: env.DB_PORT,
-      database: env.DB_NAME,
-      user: env.ADMIN_DB_USER,
-      password: env.ADMIN_DB_PASSWORD,
-    });
+    adminClient = new Client(buildAdminDbConfig(env));
     await adminClient.connect();
   });
 
   after(async () => {
     if (adminClient) {
-      await adminClient.end().catch(() => {});
+      await adminClient.end().catch(() => { });
     }
     await pool.end();
   });
@@ -676,7 +671,7 @@ describe('LedgerLine Phase 2 Comprehensive Test Suite', () => {
       );
       await client.query('ROLLBACK');
     } finally {
-      await client.query('ROLLBACK').catch(() => {});
+      await client.query('ROLLBACK').catch(() => { });
       client.release();
     }
   });
@@ -771,7 +766,7 @@ describe('LedgerLine Phase 2 Comprehensive Test Suite', () => {
       );
       await adminClient.query('ROLLBACK');
     } finally {
-      await client.query('ROLLBACK').catch(() => {});
+      await client.query('ROLLBACK').catch(() => { });
       client.release();
     }
   });
@@ -798,7 +793,7 @@ describe('LedgerLine Phase 2 Comprehensive Test Suite', () => {
       );
       await client.query('ROLLBACK');
     } finally {
-      await client.query('ROLLBACK').catch(() => {});
+      await client.query('ROLLBACK').catch(() => { });
       client.release();
     }
 
@@ -834,7 +829,7 @@ describe('LedgerLine Phase 2 Comprehensive Test Suite', () => {
     assert.equal(parseInt(holdersRes.rows[0].count, 10), 1, 'Account must retain exactly 1 active account_holder');
 
     // Ensure customerA is restored as account_holder
-    await assignMembership(adminUser.id, 'admin', accountA, customerA.id, 'account_holder').catch(() => {});
+    await assignMembership(adminUser.id, 'admin', accountA, customerA.id, 'account_holder').catch(() => { });
   });
 
   // ---------------------------------------------------------------------------
@@ -853,7 +848,7 @@ describe('LedgerLine Phase 2 Comprehensive Test Suite', () => {
       );
       await appClient.query('ROLLBACK');
     } finally {
-      await appClient.query('ROLLBACK').catch(() => {});
+      await appClient.query('ROLLBACK').catch(() => { });
       appClient.release();
     }
 
@@ -997,7 +992,7 @@ describe('LedgerLine Phase 2 Comprehensive Test Suite', () => {
         /Balance reconciliation failure on source account/
       );
     } finally {
-      await adminClient.query('ROLLBACK').catch(() => {});
+      await adminClient.query('ROLLBACK').catch(() => { });
     }
   });
 
@@ -1137,7 +1132,7 @@ describe('LedgerLine Phase 2 Comprehensive Test Suite', () => {
         /remains in pending status at commit/
       );
     } finally {
-      await client.query('ROLLBACK').catch(() => {});
+      await client.query('ROLLBACK').catch(() => { });
       client.release();
     }
   });
@@ -1448,7 +1443,7 @@ describe('LedgerLine Phase 2 Comprehensive Test Suite', () => {
           });
         },
         (err) => /Assertion role auditor does not match authoritative database role/.test(err.message) ||
-                 /Only an administrator can modify user status/.test(err.message)
+          /Only an administrator can modify user status/.test(err.message)
       );
 
       const after = await getTargetUserState(userC.id);
@@ -1501,8 +1496,8 @@ describe('LedgerLine Phase 2 Comprehensive Test Suite', () => {
           await setUserStatus(demotedAdminId, userC.id, false, 'Demoted admin unauthorized attempt');
         },
         (err) => /Assertion role admin does not match authoritative database role customer/.test(err.message) ||
-                 /Caller is not an active administrator in database/.test(err.message) ||
-                 /Only an administrator can modify user status/.test(err.message)
+          /Caller is not an active administrator in database/.test(err.message) ||
+          /Only an administrator can modify user status/.test(err.message)
       );
 
       const after = await getTargetUserState(userC.id);

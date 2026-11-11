@@ -4,6 +4,7 @@ import { fileURLToPath } from 'url';
 import pkg from 'pg';
 const { Client } = pkg;
 import { env } from '../src/config/env.js';
+import { buildAdminDbConfig } from '../src/config/dbConfig.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -14,14 +15,9 @@ async function runMigrations() {
   console.log('--- Starting LedgerLine Database Migration ---');
   console.log(`Target Database: ${env.DB_NAME} on ${env.DB_HOST}:${env.DB_PORT}`);
   console.log(`Connecting as Administrator: ${env.ADMIN_DB_USER}`);
+  console.log(`TLS / SSL: ${env.DB_SSL ? 'enabled (certificate verification active)' : 'disabled'}`);
 
-  const client = new Client({
-    host: env.DB_HOST,
-    port: env.DB_PORT,
-    database: env.DB_NAME,
-    user: env.ADMIN_DB_USER,
-    password: env.ADMIN_DB_PASSWORD,
-  });
+  const client = new Client(buildAdminDbConfig(env));
 
   let lockAcquired = false;
 

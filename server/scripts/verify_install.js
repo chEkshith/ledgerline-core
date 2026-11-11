@@ -1,17 +1,13 @@
 import pg from 'pg';
 import { env } from '../src/config/env.js';
+import { buildAdminDbConfig } from '../src/config/dbConfig.js';
 
 const { Pool } = pg;
 
 async function verifyInstallation() {
   console.log(`Starting Database Installation & Security Catalog Audit on database: ${env.DB_NAME}...`);
-  const pool = new Pool({
-    host: env.DB_HOST,
-    port: env.DB_PORT,
-    database: env.DB_NAME,
-    user: env.ADMIN_DB_USER || 'postgres',
-    password: env.ADMIN_DB_PASSWORD,
-  });
+  console.log(`TLS / SSL: ${env.DB_SSL ? 'enabled (certificate verification active)' : 'disabled'}`);
+  const pool = new Pool(buildAdminDbConfig(env));
 
   try {
     // 1. Audit RLS on domain tables

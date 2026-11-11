@@ -1,6 +1,7 @@
 import pkg from 'pg';
 const { Client } = pkg;
 import { env } from '../src/config/env.js';
+import { buildAdminDbConfig } from '../src/config/dbConfig.js';
 import { hashPassword } from '../src/utils/crypto.js';
 
 /**
@@ -17,6 +18,7 @@ export async function bootstrapDatabase() {
   console.log('--- Starting Secure Database Bootstrap ---');
   console.log(`Database: ${env.DB_NAME} on ${env.DB_HOST}:${env.DB_PORT}`);
   console.log(`Administrative User: ${env.ADMIN_DB_USER}`);
+  console.log(`TLS / SSL: ${env.DB_SSL ? 'enabled (certificate verification active)' : 'disabled'}`);
 
   if (env.NODE_ENV === 'production') {
     if (!process.env.ADMIN_DB_USER || !process.env.ADMIN_DB_PASSWORD) {
@@ -31,13 +33,7 @@ export async function bootstrapDatabase() {
     }
   }
 
-  const client = new Client({
-    host: env.DB_HOST,
-    port: env.DB_PORT,
-    database: env.DB_NAME,
-    user: env.ADMIN_DB_USER,
-    password: env.ADMIN_DB_PASSWORD,
-  });
+  const client = new Client(buildAdminDbConfig(env));
 
   try {
     await client.connect();
@@ -106,7 +102,7 @@ export async function bootstrapDatabase() {
     await client.query('COMMIT');
     console.log('--- Secure Database Bootstrap Completed Successfully ---');
   } catch (error) {
-    await client.query('ROLLBACK').catch(() => {});
+    await client.query('ROLLBACK').catch(() => { });
     console.error('Bootstrap failed:', error.message);
     throw error;
   } finally {
