@@ -2,11 +2,11 @@ import React, { useEffect, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import ThemeToggle from './ThemeToggle';
+import { Brand } from './Brand';
 import {
   Activity,
   ArrowLeftRight,
   ChevronRight,
-  Landmark,
   LayoutDashboard,
   LogOut,
   Menu,
@@ -26,39 +26,27 @@ function getPageMeta(pathname) {
   return { section: 'LedgerLine', title: 'Workspace' };
 }
 
-function Brand({ compact = false }) {
-  return (
-    <Link to="/dashboard" className="flex items-center gap-2.5 rounded-lg focus-visible:outline-none">
-      <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-brand text-white shadow-sm">
-        <Landmark className="h-4 w-4" aria-hidden="true" />
-      </span>
-      {!compact && (
-        <span className="leading-tight">
-          <span className="block text-base font-bold tracking-tight text-ink">LedgerLine</span>
-          <span className="block text-[10px] font-semibold uppercase tracking-[0.18em] text-muted">
-            Ledger infrastructure
-          </span>
-        </span>
-      )}
-    </Link>
-  );
-}
-
 function NavItem({ to, icon: Icon, label, active, onClick }) {
   return (
     <Link
       to={to}
       onClick={onClick}
       aria-current={active ? 'page' : undefined}
-      className={`group flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
+      className={`group relative flex items-center gap-2.5 rounded-lg px-3 py-2 text-[13px] font-medium transition-all ${
         active
           ? 'bg-brand-soft text-brand'
-          : 'text-ink-soft hover:bg-slate-50 hover:text-ink'
+          : 'text-ink-soft hover:bg-paper hover:text-ink'
       }`}
     >
-      <Icon className={`h-4 w-4 ${active ? 'text-brand' : 'text-slate-400 group-hover:text-ink-soft'}`} aria-hidden="true" />
+      {active && (
+        <span className="absolute inset-y-1.5 left-0 w-0.5 rounded-full bg-brass" aria-hidden="true" />
+      )}
+      <Icon
+        className={`h-4 w-4 ${active ? 'text-brand' : 'text-slate-400 group-hover:text-ink-soft'}`}
+        aria-hidden="true"
+      />
       <span>{label}</span>
-      {active && <ChevronRight className="ml-auto h-3.5 w-3.5 text-brand/70" aria-hidden="true" />}
+      {active && <ChevronRight className="ml-auto h-3.5 w-3.5 text-brand/60" aria-hidden="true" />}
     </Link>
   );
 }
@@ -98,17 +86,17 @@ function SidebarContent({ onNavigate, onLogout }) {
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex h-16 items-center px-5">
-        <Brand />
+      <div className="flex h-[72px] items-center border-b border-line px-5">
+        <Brand onClick={onNavigate} />
       </div>
 
-      <nav className="flex-1 space-y-6 overflow-y-auto px-3 py-4" aria-label="Primary">
+      <nav className="flex-1 space-y-6 overflow-y-auto px-3 py-5" aria-label="Primary">
         {groups.map((group) => (
           <div key={group.label}>
-            <div className="px-3 pb-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400">
+            <div className="px-3 pb-2 text-[9px] font-semibold uppercase tracking-[0.2em] text-slate-400">
               {group.label}
             </div>
-            <div className="space-y-1">
+            <div className="space-y-0.5">
               {group.items.map((item) => (
                 <NavItem
                   key={item.to}
@@ -122,29 +110,37 @@ function SidebarContent({ onNavigate, onLogout }) {
         ))}
       </nav>
 
-      <div className="border-t border-line p-3">
-        <div className="rounded-lg bg-slate-50 p-3">
-          <div className="flex items-center gap-2 text-xs font-semibold text-ink">
-            <span className="h-1.5 w-1.5 rounded-full bg-brand" aria-hidden="true" />
-            Double-entry ledger
+      <div className="space-y-3 border-t border-line p-3">
+        <div className="relative overflow-hidden rounded-xl bg-ink-deep p-3.5 text-[#f8f5ed]">
+          <span
+            className="pointer-events-none absolute -right-8 -top-8 h-24 w-24 rounded-full bg-emerald-400/20 blur-2xl"
+            aria-hidden="true"
+          />
+          <div className="relative">
+            <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-emerald-200/80">
+              <span className="h-1 w-1 rounded-full bg-brass" aria-hidden="true" />
+              Ledger note
+            </div>
+            <p className="mt-1.5 font-display text-[13px] leading-snug">
+              Money movement with a ledger you can prove.
+            </p>
           </div>
-          <p className="mt-1 text-[11px] leading-relaxed text-muted">
-            Money movement with a ledger you can prove.
-          </p>
         </div>
 
-        <div className="mt-3 flex items-center gap-2.5 rounded-lg px-2 py-2">
-          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-ink text-[11px] font-bold uppercase text-white">
+        <div className="flex items-center gap-2.5 rounded-xl border border-line bg-paper px-2.5 py-2">
+          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-brand-solid text-[10px] font-bold uppercase text-[#fffdf8]">
             {(user?.email || 'LL').slice(0, 2)}
           </div>
           <div className="min-w-0 flex-1">
-            <div className="truncate text-xs font-semibold text-ink">{user?.email}</div>
-            <div className="text-[10px] font-semibold uppercase tracking-wide text-muted">{user?.role}</div>
+            <div className="truncate text-[11px] font-semibold text-ink">{user?.email}</div>
+            <div className="text-[9px] font-semibold uppercase tracking-[0.14em] text-brass">
+              {user?.role}
+            </div>
           </div>
           <button
             type="button"
             onClick={onLogout}
-            className="rounded-md p-1.5 text-slate-400 transition-colors hover:bg-slate-100 hover:text-danger"
+            className="rounded-md p-1.5 text-slate-400 transition-colors hover:bg-surface hover:text-danger"
             aria-label="Sign out"
             title="Sign out"
           >
@@ -194,8 +190,8 @@ export default function Navbar() {
         <SidebarContent onLogout={handleLogout} />
       </aside>
 
-      <header className="sticky top-0 z-30 border-b border-line bg-canvas/85 backdrop-blur lg:pl-64">
-        <div className="flex h-16 items-center gap-3 px-4 sm:px-6 lg:px-8">
+      <header className="sticky top-0 z-30 border-b border-line bg-canvas/80 backdrop-blur-xl lg:pl-64">
+        <div className="flex h-[72px] items-center gap-3 px-4 sm:px-6 lg:px-8">
           <button
             type="button"
             onClick={() => setMobileOpen(true)}
@@ -207,36 +203,46 @@ export default function Navbar() {
           </button>
 
           <div className="lg:hidden">
-            <Brand compact />
+            <Brand compact to="/dashboard" />
           </div>
 
           <div className="hidden min-w-0 lg:block">
-            <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-muted">{meta.section}</div>
-            <div className="truncate text-sm font-semibold text-ink">{meta.title}</div>
+            <div className="flex items-center gap-2 text-[9px] font-semibold uppercase tracking-[0.18em] text-muted">
+              <span>{meta.section}</span>
+              <span className="text-line-strong" aria-hidden="true">
+                /
+              </span>
+              <span className="text-brass">{meta.title}</span>
+            </div>
+            <div className="mt-0.5 truncate font-display text-[15px] font-semibold text-ink">
+              {meta.title}
+            </div>
           </div>
 
           <div className="ml-auto flex items-center gap-2">
             <Link
               to="/operations"
-              className="hidden h-9 items-center gap-1.5 rounded-lg border border-line bg-surface px-3 text-xs font-semibold text-ink shadow-sm transition-colors hover:bg-slate-50 sm:inline-flex"
+              className="hidden h-9 items-center gap-1.5 rounded-lg border border-line bg-surface px-3 text-xs font-semibold text-ink shadow-sm transition-colors hover:border-brand/30 hover:bg-brand-soft sm:inline-flex"
             >
               <ArrowLeftRight className="h-3.5 w-3.5 text-brand" aria-hidden="true" />
               Move money
             </Link>
 
             <div className="hidden flex-col text-right leading-tight md:flex">
-              <span className="max-w-[180px] truncate text-xs font-semibold text-ink">{user?.email}</span>
-              <span className="text-[10px] font-semibold uppercase tracking-wide text-muted">{user?.role}</span>
+              <span className="max-w-[180px] truncate text-[11px] font-semibold text-ink">{user?.email}</span>
+              <span className="text-[9px] font-semibold uppercase tracking-[0.14em] text-brass">
+                {user?.role}
+              </span>
             </div>
 
-            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-ink text-[11px] font-bold uppercase text-white md:hidden">
+            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-brand-solid text-[10px] font-bold uppercase text-[#fffdf8] md:hidden">
               {(user?.email || 'LL').slice(0, 2)}
             </div>
 
             <button
               type="button"
               onClick={handleLogout}
-              className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-line bg-surface text-slate-400 shadow-sm transition-colors hover:text-danger"
+              className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-line bg-surface text-slate-400 shadow-sm transition-colors hover:border-danger/40 hover:text-danger"
               aria-label="Sign out"
               title="Sign out"
             >
@@ -251,7 +257,7 @@ export default function Navbar() {
       {mobileOpen && (
         <div className="fixed inset-0 z-50 lg:hidden">
           <div
-            className="absolute inset-0 bg-ink/40 backdrop-blur-sm animate-fadeIn"
+            className="absolute inset-0 bg-[#0b1712]/55 backdrop-blur-sm animate-fadeIn"
             onClick={() => setMobileOpen(false)}
             aria-hidden="true"
           />
@@ -264,7 +270,7 @@ export default function Navbar() {
             <button
               type="button"
               onClick={() => setMobileOpen(false)}
-              className="absolute right-3 top-3.5 z-10 rounded-md p-1.5 text-slate-400 transition-colors hover:bg-slate-100 hover:text-ink"
+              className="absolute right-3 top-5 z-10 rounded-md p-1.5 text-slate-400 transition-colors hover:bg-slate-100 hover:text-ink"
               aria-label="Close navigation"
             >
               <X className="h-4 w-4" />

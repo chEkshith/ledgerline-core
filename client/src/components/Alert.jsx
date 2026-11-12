@@ -1,14 +1,14 @@
 import React from 'react';
-import { AlertCircle, CheckCircle2, Info, X } from 'lucide-react';
+import { CheckCircle2, AlertCircle, Info, X } from 'lucide-react';
 
 export default function Alert({ type = 'info', message, onClose }) {
   if (!message) return null;
 
   const styles = {
-    info: 'bg-accent-soft border-blue-200 text-blue-900',
-    success: 'bg-success-soft border-emerald-200 text-emerald-900',
-    warning: 'bg-warning-soft border-amber-200 text-amber-900',
-    error: 'bg-danger-soft border-red-200 text-red-900',
+    info: 'border-accent/25 bg-accent-soft text-accent',
+    success: 'border-success/25 bg-success-soft text-success',
+    warning: 'border-warning/25 bg-warning-soft text-warning',
+    error: 'border-danger/25 bg-danger-soft text-danger',
   };
 
   const icons = {
@@ -20,7 +20,7 @@ export default function Alert({ type = 'info', message, onClose }) {
 
   return (
     <div
-      className={`flex items-start justify-between gap-3 rounded-lg border px-3.5 py-3 ${styles[type] || styles.info}`}
+      className={`flex items-start justify-between gap-3 rounded-xl border px-3.5 py-3 shadow-sm ${styles[type] || styles.info}`}
       role={type === 'error' ? 'alert' : 'status'}
     >
       <div className="flex items-start gap-2.5">

@@ -6,18 +6,21 @@ const ToastContext = createContext(null);
 const tones = {
   success: {
     icon: CheckCircle2,
-    className: 'border-emerald-200 bg-surface text-ink',
+    bar: 'bg-success',
     iconClass: 'text-success',
+    surface: 'bg-success-soft',
   },
   error: {
     icon: AlertCircle,
-    className: 'border-red-200 bg-surface text-ink',
+    bar: 'bg-danger',
     iconClass: 'text-danger',
+    surface: 'bg-danger-soft',
   },
   info: {
     icon: Info,
-    className: 'border-blue-200 bg-surface text-ink',
+    bar: 'bg-accent',
     iconClass: 'text-accent',
+    surface: 'bg-accent-soft',
   },
 };
 
@@ -70,11 +73,14 @@ export function ToastProvider({ children }) {
           return (
             <div
               key={toast.id}
-              className={`pointer-events-auto flex w-full max-w-sm items-start gap-3 rounded-xl border p-3.5 shadow-lg animate-toastIn ${tone.className}`}
+              className="pointer-events-auto relative flex w-full max-w-sm items-start gap-3 overflow-hidden rounded-xl border border-line bg-surface p-3.5 pl-4 shadow-2xl animate-toastIn"
               role="status"
             >
-              <Icon className={`mt-0.5 h-4 w-4 shrink-0 ${tone.iconClass}`} aria-hidden="true" />
-              <p className="flex-1 text-sm leading-relaxed">{toast.message}</p>
+              <span className={`absolute inset-y-0 left-0 w-1 ${tone.bar}`} aria-hidden="true" />
+              <span className={`mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-md ${tone.surface}`}>
+                <Icon className={`h-3.5 w-3.5 ${tone.iconClass}`} aria-hidden="true" />
+              </span>
+              <p className="flex-1 pt-0.5 text-sm leading-relaxed text-ink">{toast.message}</p>
               <button
                 type="button"
                 onClick={() => dismiss(toast.id)}

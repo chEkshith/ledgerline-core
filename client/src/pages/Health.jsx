@@ -104,14 +104,18 @@ export default function Health() {
       {health?.error && <Alert type="error" message={health.error} />}
 
       <Card
-        className={
-          overallTone === 'success'
-            ? 'border-emerald-200'
-            : overallTone === 'warning'
-              ? 'border-amber-200'
-              : 'border-red-200'
-        }
+        className={`relative overflow-hidden animate-rise ${overallTone === 'success' ? 'border-success/30' : overallTone === 'warning' ? 'border-warning/30' : 'border-danger/30'}`}
       >
+        <span
+          className={`pointer-events-none absolute inset-x-0 top-0 h-1 ${
+            overallTone === 'success'
+              ? 'bg-gradient-to-r from-success via-brand to-brass'
+              : overallTone === 'warning'
+                ? 'bg-warning'
+                : 'bg-danger'
+          }`}
+          aria-hidden="true"
+        />
         <CardBody className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-start gap-3">
             <span
@@ -132,7 +136,7 @@ export default function Health() {
               )}
             </span>
             <div>
-              <h2 className="text-base font-semibold text-ink">
+              <h2 className="font-display text-lg font-semibold tracking-tight text-ink">
                 {overallTone === 'success'
                   ? 'All systems operational'
                   : overallTone === 'warning'

@@ -37,34 +37,25 @@ export default function ThemeToggle({ variant = 'light' }) {
       aria-label={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
       title={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
       onClick={() => setTheme(isDark ? 'light' : 'dark')}
-      className={`relative inline-flex h-9 w-16 shrink-0 items-center rounded-full border px-1 shadow-sm transition-colors duration-300 ease-in-out ${
+      className={`group relative inline-flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-lg border shadow-sm transition-colors duration-300 focus-visible:outline-none focus-visible:ring-2 ${
         onDark
-          ? 'border-white/10 bg-white/5 hover:bg-white/10'
-          : 'border-line bg-slate-100 hover:bg-slate-200'
+          ? 'border-white/12 bg-white/5 text-[#f8f5ed] hover:bg-white/10 focus-visible:ring-emerald-300'
+          : 'border-line bg-surface text-ink-soft hover:border-line-strong hover:bg-paper focus-visible:ring-brand'
       }`}
     >
       <span
-        className={`pointer-events-none absolute inset-0 flex items-center justify-between px-2 ${
-          onDark ? 'text-white/40' : 'text-slate-400'
-        }`}
+        className="absolute inset-0 flex items-center justify-center transition-transform duration-500 ease-out"
+        style={{ transform: isDark ? 'rotate(0deg) scale(1)' : 'rotate(90deg) scale(0.4)', opacity: isDark ? 1 : 0 }}
         aria-hidden="true"
       >
-        <Sun className="h-3.5 w-3.5" />
-        <Moon className="h-3.5 w-3.5" />
+        <Moon className="h-4 w-4" />
       </span>
       <span
-        className={`relative z-10 inline-flex h-7 w-7 items-center justify-center rounded-full border shadow-sm transition-transform duration-300 ease-in-out ${
-          onDark ? 'border-white/15 bg-[#07111f] text-white' : 'border-line bg-surface text-ink'
-        }`}
-        style={{ transform: isDark ? 'translateX(1.75rem)' : 'translateX(0)' }}
+        className="absolute inset-0 flex items-center justify-center transition-transform duration-500 ease-out"
+        style={{ transform: isDark ? 'rotate(-90deg) scale(0.4)' : 'rotate(0deg) scale(1)', opacity: isDark ? 0 : 1 }}
+        aria-hidden="true"
       >
-        <span
-          className="inline-flex transition-transform duration-300 ease-in-out"
-          style={{ transform: isDark ? 'rotate(360deg)' : 'rotate(0deg)' }}
-          aria-hidden="true"
-        >
-          {isDark ? <Moon className="h-3.5 w-3.5" /> : <Sun className="h-3.5 w-3.5" />}
-        </span>
+        <Sun className="h-4 w-4" />
       </span>
     </button>
   );

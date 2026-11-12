@@ -11,7 +11,6 @@ import {
 } from '../utils/formatters';
 import {
   FileText,
-  ArrowLeft,
   ShieldCheck,
   CheckCircle2,
   XCircle,
@@ -35,6 +34,7 @@ import {
   EmptyState,
   EntryTypeBadge,
   Field,
+  PageHeader,
   PageLoading,
   Textarea,
   TransactionStatusBadge,
@@ -158,42 +158,39 @@ export default function TransactionDetail() {
 
   return (
     <div className="mx-auto max-w-5xl space-y-6 animate-fadeIn">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-        <div className="flex items-start gap-3">
-          <Link
-            to="/accounts"
-            className="mt-0.5 inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-line bg-surface text-ink-soft shadow-sm transition-colors hover:bg-slate-50"
-            aria-label="Back to accounts"
-          >
-            <ArrowLeft className="h-4 w-4" aria-hidden="true" />
-          </Link>
-          <div className="min-w-0">
-            <p className="text-[11px] font-semibold uppercase tracking-widest text-muted">Ledger verification</p>
-            <h1 className="mt-0.5 text-xl font-bold tracking-tight text-ink sm:text-2xl">Transaction detail</h1>
-            <p className="mt-1 truncate font-mono text-[11px] text-muted">{id}</p>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-2">
-          <Button variant="secondary" size="sm" onClick={loadTransaction}>
-            <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />
-            Refresh
-          </Button>
-          {isAdmin && tx?.status === 'posted' && tx?.type !== 'reversal' && (
-            <Button
-              variant="outlineDanger"
-              size="sm"
-              onClick={() => {
-                setReverseError(null);
-                setIsReverseModalOpen(true);
-              }}
-            >
-              <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />
-              Admin reversal
+      <PageHeader
+        eyebrow="Ledger verification"
+        title="Transaction detail"
+        description="Inspect the transaction record and prove its double-entry postings."
+        backTo="/accounts"
+        backLabel="Back to accounts"
+        meta={
+          <span className="truncate font-mono text-[10px] text-slate-400" title={id}>
+            {id}
+          </span>
+        }
+        actions={
+          <>
+            <Button variant="secondary" size="sm" onClick={loadTransaction}>
+              <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />
+              Refresh
             </Button>
-          )}
-        </div>
-      </div>
+            {isAdmin && tx?.status === 'posted' && tx?.type !== 'reversal' && (
+              <Button
+                variant="outlineDanger"
+                size="sm"
+                onClick={() => {
+                  setReverseError(null);
+                  setIsReverseModalOpen(true);
+                }}
+              >
+                <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />
+                Admin reversal
+              </Button>
+            )}
+          </>
+        }
+      />
 
       {error && <Alert type="error" message={error} onClose={() => setError(null)} />}
 
@@ -212,14 +209,19 @@ export default function TransactionDetail() {
         </Card>
       ) : (
         <>
-          <Card>
+          <Card className="relative overflow-hidden">
+            <span
+              className="pointer-events-none absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-brand via-brand/50 to-brass"
+              aria-hidden="true"
+            />
             <CardBody className="space-y-5">
               <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                 <div>
-                  <div className="text-[10px] font-semibold uppercase tracking-widest text-muted">
+                  <div className="flex items-center gap-2 text-[9px] font-semibold uppercase tracking-[0.18em] text-muted">
+                    <span className="h-1 w-4 rounded-full bg-brass" aria-hidden="true" />
                     Transaction amount
                   </div>
-                  <div className="mt-1 text-3xl font-bold tracking-tight text-ink tabular-nums sm:text-4xl">
+                  <div className="mt-2 text-figure text-[2.5rem] leading-none text-ink sm:text-[3rem]">
                     {paiseToRupees(tx.amount_paise)}
                   </div>
                   <div className="mt-2 flex flex-wrap items-center gap-2">
@@ -231,7 +233,7 @@ export default function TransactionDetail() {
                   </div>
                 </div>
 
-                <div className="rounded-lg border border-line bg-slate-50 p-3 text-xs">
+                <div className="rounded-lg border border-line bg-paper/70 p-3 text-xs">
                   <div className="text-[10px] font-semibold uppercase tracking-widest text-muted">Created</div>
                   <div className="mt-1 font-medium text-ink-soft">{formatTimestamp(tx.created_at)}</div>
                   <div className="mt-2 text-[10px] font-semibold uppercase tracking-widest text-muted">
@@ -241,7 +243,7 @@ export default function TransactionDetail() {
                 </div>
               </div>
 
-              <div className="rounded-lg border border-line bg-slate-50/70 p-3">
+              <div className="rounded-lg border border-line bg-paper/60 p-3">
                 <div className="flex flex-col gap-2 text-xs sm:flex-row sm:items-center">
                   <div className="min-w-0 flex-1">
                     <div className="text-[10px] font-semibold uppercase tracking-widest text-muted">Source</div>
@@ -299,7 +301,7 @@ export default function TransactionDetail() {
               </dl>
 
               {tx.refusal_reason && (
-                <div className="flex items-start gap-3 rounded-lg border border-red-200 bg-danger-soft/60 p-3 text-xs text-red-900">
+                <div className="flex items-start gap-3 rounded-xl border border-danger/20 bg-danger-soft/70 p-3.5 text-xs text-danger">
                   <XCircle className="mt-0.5 h-4 w-4 shrink-0 text-danger" aria-hidden="true" />
                   <div>
                     <p className="font-semibold">Engine refusal</p>
@@ -328,10 +330,10 @@ export default function TransactionDetail() {
               <div
                 className={`flex items-start gap-3 rounded-lg border p-3 text-xs ${
                   tone === 'success'
-                    ? 'border-emerald-200 bg-success-soft/60 text-emerald-900'
+                    ? 'border-success/20 bg-success-soft/70 text-success'
                     : tone === 'warning'
-                      ? 'border-amber-200 bg-warning-soft/60 text-amber-900'
-                      : 'border-red-200 bg-danger-soft/60 text-red-900'
+                      ? 'border-warning/20 bg-warning-soft/70 text-warning'
+                      : 'border-danger/20 bg-danger-soft/70 text-danger'
                 }`}
               >
                 <span className="mt-0.5 shrink-0">
@@ -344,7 +346,7 @@ export default function TransactionDetail() {
               </div>
 
               {postings.length === 0 ? (
-                <div className="rounded-lg border border-dashed border-line bg-slate-50/60 px-4 py-8 text-center">
+                <div className="rounded-lg border border-dashed border-line bg-paper/60 px-4 py-8 text-center">
                   <FileText className="mx-auto h-8 w-8 text-slate-300" aria-hidden="true" />
                   <p className="mt-2 text-sm font-semibold text-ink-soft">No ledger postings</p>
                   <p className="mx-auto mt-1 max-w-md text-xs text-muted">
@@ -355,7 +357,7 @@ export default function TransactionDetail() {
                 <>
                   <div className="hidden overflow-x-auto md:block">
                     <table className="w-full text-left text-xs">
-                      <thead className="border-b border-line bg-slate-50/80 text-[10px] font-semibold uppercase tracking-widest text-muted">
+                      <thead className="border-b border-line bg-paper/80 text-[10px] font-semibold uppercase tracking-widest text-muted">
                         <tr>
                           <th className="px-4 py-3">Seq</th>
                           <th className="px-4 py-3">Account</th>
@@ -368,7 +370,7 @@ export default function TransactionDetail() {
                         {postings.map((posting) => {
                           const credit = String(posting.entry_type || '').toLowerCase() === 'credit';
                           return (
-                            <tr key={posting.id} className="transition-colors hover:bg-slate-50">
+                            <tr key={posting.id} className="transition-colors hover:bg-paper/60">
                               <td className="px-4 py-3 font-mono text-muted">{posting.sequence_number}</td>
                               <td className="px-4 py-3">
                                 <Link
@@ -489,7 +491,7 @@ export default function TransactionDetail() {
             <code className="font-mono text-ink-soft">{id}</code>.
           </p>
 
-          <div className="rounded-lg border border-line bg-slate-50 p-3">
+          <div className="rounded-lg border border-line bg-paper/70 p-3">
             <div className="text-[10px] font-semibold uppercase tracking-widest text-muted">
               Assigned idempotency key · preserved on retry
             </div>

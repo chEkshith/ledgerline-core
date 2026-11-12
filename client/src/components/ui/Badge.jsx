@@ -1,18 +1,19 @@
 import React from 'react';
 
 const variants = {
-  neutral: 'bg-slate-100 text-ink-soft border-slate-200',
-  brand: 'bg-brand-soft text-brand border-emerald-200',
-  success: 'bg-success-soft text-success border-emerald-200',
-  warning: 'bg-warning-soft text-warning border-amber-200',
-  danger: 'bg-danger-soft text-danger border-red-200',
-  info: 'bg-accent-soft text-accent border-blue-200',
+  neutral: 'border-line bg-paper text-ink-soft',
+  brand: 'border-brand/25 bg-brand-soft text-brand',
+  success: 'border-success/25 bg-success-soft text-success',
+  warning: 'border-warning/25 bg-warning-soft text-warning',
+  danger: 'border-danger/25 bg-danger-soft text-danger',
+  info: 'border-accent/25 bg-accent-soft text-accent',
+  brass: 'border-brass/30 bg-brass-soft text-brass',
 };
 
 export function Badge({ variant = 'neutral', className = '', children, dot = false, ...props }) {
   return (
     <span
-      className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide ${variants[variant] || variants.neutral} ${className}`}
+      className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] ${variants[variant] || variants.neutral} ${className}`}
       {...props}
     >
       {dot && <span className="h-1.5 w-1.5 rounded-full bg-current" aria-hidden="true" />}

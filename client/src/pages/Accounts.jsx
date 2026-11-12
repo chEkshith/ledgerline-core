@@ -206,34 +206,47 @@ export default function Accounts() {
       </div>
 
       <Card>
-        <CardBody className="flex flex-col gap-3 sm:flex-row sm:items-center">
-          <div className="relative flex-1">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" aria-hidden="true" />
-            <Input
-              type="text"
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-              placeholder="Search by account number or UUID…"
-              className="pl-9"
-              aria-label="Search accounts"
-            />
+        <CardBody className="flex flex-col gap-3">
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <span className="h-1 w-4 rounded-full bg-brass" aria-hidden="true" />
+              <span className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted">
+                Ledger directory
+              </span>
+            </div>
+            <span className="font-mono text-[10px] text-muted">
+              {filteredAccounts.length}/{accounts.length}
+            </span>
           </div>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+            <div className="relative flex-1">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" aria-hidden="true" />
+              <Input
+                type="text"
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                placeholder="Search by account number or UUID…"
+                className="pl-9"
+                aria-label="Search accounts"
+              />
+            </div>
 
-          <div className="sm:w-48">
-            <Select
-              value={statusFilter}
-              onChange={(event) => setStatusFilter(event.target.value)}
-              aria-label="Filter accounts by status"
-            >
-              <option value="all">All statuses</option>
-              <option value="active">Active</option>
-              <option value="frozen">Frozen</option>
-              <option value="closed">Closed</option>
-            </Select>
-          </div>
+            <div className="sm:w-48">
+              <Select
+                value={statusFilter}
+                onChange={(event) => setStatusFilter(event.target.value)}
+                aria-label="Filter accounts by status"
+              >
+                <option value="all">All statuses</option>
+                <option value="active">Active</option>
+                <option value="frozen">Frozen</option>
+                <option value="closed">Closed</option>
+              </Select>
+            </div>
 
-          <div className="shrink-0 text-xs text-muted">
-            {filteredAccounts.length} of {accounts.length} shown
+            <div className="shrink-0 text-xs text-muted">
+              {filteredAccounts.length} of {accounts.length} shown
+            </div>
           </div>
         </CardBody>
       </Card>
@@ -281,13 +294,22 @@ export default function Accounts() {
             const copied = copiedId === acc.id;
 
             return (
-              <Card key={acc.id} className="flex flex-col">
+              <Card
+                key={acc.id}
+                className="group relative flex flex-col overflow-hidden transition-all duration-200 hover:-translate-y-0.5 hover:border-line-strong hover:shadow-lg hover:shadow-ink/5"
+              >
+                <span
+                  className={`absolute inset-x-0 top-0 h-0.5 ${isSystem ? 'bg-accent/60' : 'bg-brand/70'}`}
+                  aria-hidden="true"
+                />
                 <CardBody className="flex flex-1 flex-col">
                   <div className="flex items-start justify-between gap-3">
-                    <div className="flex min-w-0 items-center gap-2">
+                    <div className="flex min-w-0 items-center gap-2.5">
                       <span
-                        className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${
-                          isSystem ? 'bg-accent-soft text-accent' : 'bg-brand-soft text-brand'
+                        className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ring-1 ${
+                          isSystem
+                            ? 'bg-accent-soft text-accent ring-accent/15'
+                            : 'bg-brand-soft text-brand ring-brand/15'
                         }`}
                       >
                         {isSystem ? (
@@ -304,7 +326,7 @@ export default function Accounts() {
                           <button
                             type="button"
                             onClick={() => copyAccountNumber(acc)}
-                            className="rounded p-1 text-slate-400 transition-colors hover:bg-slate-100 hover:text-ink"
+                            className="rounded p-1 text-slate-400 transition-colors hover:bg-paper hover:text-ink"
                             aria-label={`Copy account number ${acc.account_number}`}
                             title="Copy account number"
                           >
@@ -325,11 +347,11 @@ export default function Accounts() {
                     <AccountStatusBadge status={acc.status} />
                   </div>
 
-                  <div className="mt-4">
-                    <div className="text-[10px] font-semibold uppercase tracking-widest text-muted">
+                  <div className="mt-5">
+                    <div className="text-[9px] font-semibold uppercase tracking-[0.16em] text-muted">
                       Ledger balance
                     </div>
-                    <div className="mt-1 text-2xl font-bold tracking-tight text-ink tabular-nums">
+                    <div className="mt-1 text-figure text-2xl tracking-tight text-ink">
                       {paiseToRupees(acc.current_balance)}
                     </div>
                   </div>

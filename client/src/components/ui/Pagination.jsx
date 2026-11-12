@@ -11,7 +11,7 @@ export function Pagination({ total, limit, offset, onChange, label = 'entries' }
   const pages = Math.max(1, Math.ceil(total / limit));
 
   return (
-    <div className="flex flex-col gap-3 border-t border-line px-5 py-3 text-xs text-muted sm:flex-row sm:items-center sm:justify-between">
+    <div className="flex flex-col gap-3 border-t border-line bg-paper/50 px-5 py-3 text-xs text-muted sm:flex-row sm:items-center sm:justify-between">
       <div>
         Showing <span className="font-semibold text-ink">{start}</span>–
         <span className="font-semibold text-ink">{end}</span> of{' '}

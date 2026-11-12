@@ -261,7 +261,7 @@ export default function Admin() {
                 />
               </Field>
 
-              <div className="rounded-lg border border-line bg-slate-50 p-3">
+              <div className="rounded-lg border border-line bg-paper/70 p-3">
                 <div className="text-[10px] font-semibold uppercase tracking-widest text-muted">
                   Assigned idempotency key · preserved on retry
                 </div>
@@ -286,7 +286,7 @@ export default function Admin() {
       </div>
 
       {lastReversal && (
-        <Card className="border-emerald-200">
+        <Card className="border-success/30">
           <CardBody className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex items-start gap-3">
               <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-success-soft text-success">

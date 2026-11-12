@@ -45,7 +45,7 @@ const operationMeta = {
     description: 'Vault → account',
     icon: ArrowDownLeft,
     tone: 'success',
-    activeClass: 'border-emerald-300 bg-emerald-50/60 ring-1 ring-emerald-200',
+    activeClass: 'border-success/30 bg-success-soft/50 ring-1 ring-success/15',
     iconClass: 'bg-success-soft text-success',
   },
   withdraw: {
@@ -53,7 +53,7 @@ const operationMeta = {
     description: 'Account → vault',
     icon: ArrowUpRight,
     tone: 'warning',
-    activeClass: 'border-amber-300 bg-amber-50/60 ring-1 ring-amber-200',
+    activeClass: 'border-warning/30 bg-warning-soft/50 ring-1 ring-warning/15',
     iconClass: 'bg-warning-soft text-warning',
   },
   transfer: {
@@ -61,7 +61,7 @@ const operationMeta = {
     description: 'Account → account',
     icon: ArrowLeftRight,
     tone: 'info',
-    activeClass: 'border-blue-300 bg-blue-50/60 ring-1 ring-blue-200',
+    activeClass: 'border-accent/30 bg-accent-soft/50 ring-1 ring-accent/15',
     iconClass: 'bg-accent-soft text-accent',
   },
 };
@@ -304,21 +304,26 @@ export default function Operations() {
               type="button"
               aria-pressed={selected}
               onClick={() => handleTypeChange(type)}
-              className={`flex items-center gap-3 rounded-xl border p-3 text-left transition-all ${
-                selected ? item.activeClass : 'border-line bg-surface hover:border-brand/30 hover:bg-slate-50'
+              className={`relative flex items-center gap-3 rounded-xl border p-3 text-left transition-all duration-200 hover:-translate-y-0.5 ${
+                selected
+                  ? item.activeClass
+                  : 'border-line bg-surface hover:border-line-strong hover:shadow-sm'
               }`}
             >
               <span
                 className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg ${
-                  selected ? item.iconClass : 'bg-slate-100 text-slate-500'
+                  selected ? item.iconClass : 'bg-paper text-slate-400'
                 }`}
               >
                 <Icon className="h-5 w-5" aria-hidden="true" />
               </span>
-              <span>
+              <span className="min-w-0">
                 <span className="block text-sm font-semibold text-ink">{item.label}</span>
-                <span className="block text-[11px] text-muted">{item.description}</span>
+                <span className="block truncate text-[11px] text-muted">{item.description}</span>
               </span>
+              {selected && (
+                <span className="ml-auto h-1.5 w-1.5 shrink-0 rounded-full bg-brass" aria-hidden="true" />
+              )}
             </button>
           );
         })}
@@ -342,7 +347,7 @@ export default function Operations() {
             <form onSubmit={handleSubmit} className="space-y-5">
               <Field label="Source · debit account" htmlFor="source-account" required>
                 {operationType === 'deposit' ? (
-                  <div className="flex items-center justify-between gap-3 rounded-lg border border-line bg-slate-50 px-3 py-2.5 text-sm">
+                  <div className="flex items-center justify-between gap-3 rounded-lg border border-line bg-paper/70 px-3 py-2.5 text-sm">
                     <span className="flex min-w-0 items-center gap-2">
                       <Building className="h-4 w-4 shrink-0 text-accent" aria-hidden="true" />
                       <span className="truncate font-medium text-ink">System cash vault</span>
@@ -369,7 +374,7 @@ export default function Operations() {
 
               <Field label="Destination · credit account" htmlFor="destination-account" required>
                 {operationType === 'withdraw' ? (
-                  <div className="flex items-center justify-between gap-3 rounded-lg border border-line bg-slate-50 px-3 py-2.5 text-sm">
+                  <div className="flex items-center justify-between gap-3 rounded-lg border border-line bg-paper/70 px-3 py-2.5 text-sm">
                     <span className="flex min-w-0 items-center gap-2">
                       <Building className="h-4 w-4 shrink-0 text-accent" aria-hidden="true" />
                       <span className="truncate font-medium text-ink">System cash vault</span>
@@ -435,7 +440,7 @@ export default function Operations() {
                 </div>
               )}
 
-              <div className="rounded-lg border border-line bg-slate-50 p-3">
+              <div className="rounded-lg border border-line bg-paper/70 p-3">
                 <div className="flex items-start gap-2 text-xs text-muted">
                   <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-brand" aria-hidden="true" />
                   <p className="leading-relaxed">
@@ -453,70 +458,89 @@ export default function Operations() {
           </CardBody>
         </Card>
 
-        <Card className="flex flex-col">
-          <CardHeader>
+        <section className="relative flex flex-col overflow-hidden rounded-2xl bg-ink-deep text-[#f8f5ed] shadow-ledger animate-rise">
+          <div
+            className="pointer-events-none absolute inset-0"
+            style={{
+              background:
+                'radial-gradient(520px circle at 90% 0%, rgba(168,121,43,0.18), transparent 58%), radial-gradient(420px circle at 0% 100%, rgba(22,121,79,0.22), transparent 58%)',
+            }}
+            aria-hidden="true"
+          />
+          <div className="ledger-grid pointer-events-none absolute inset-0 opacity-40" aria-hidden="true" />
+
+          <div className="relative flex flex-1 flex-col gap-4 p-5 sm:p-6">
             <div>
-              <h2 className="flex items-center gap-2 text-sm font-semibold text-ink">
-                <ShieldCheck className="h-4 w-4 text-brand" aria-hidden="true" />
+              <h2 className="flex items-center gap-2 text-sm font-semibold text-[#fffdf8]">
+                <ShieldCheck className="h-4 w-4 text-emerald-300" aria-hidden="true" />
                 Idempotency
               </h2>
-              <p className="mt-0.5 text-xs text-muted">Safe retries without duplicate debits.</p>
+              <p className="mt-0.5 text-xs text-[#f8f5ed]/50">Safe retries without duplicate debits.</p>
             </div>
-          </CardHeader>
 
-          <CardBody className="flex flex-1 flex-col gap-4">
-            <p className="text-xs leading-relaxed text-muted">
+            <p className="text-xs leading-relaxed text-[#f8f5ed]/55">
               Every financial mutation requires a unique client-generated UUID key. Repeating a request with
               the same key returns the exact cached response without double debit.
             </p>
 
-            <div className="rounded-lg border border-line bg-slate-50 p-3">
+            <div className="rounded-xl border border-white/10 bg-white/[0.04] p-3.5">
               <div className="flex items-center justify-between gap-2">
-                <span className="text-[10px] font-semibold uppercase tracking-widest text-muted">
+                <span className="text-[9px] font-semibold uppercase tracking-[0.16em] text-[#f8f5ed]/40">
                   Active request key
                 </span>
                 <button
                   type="button"
                   onClick={handleCopyKey}
-                  className="inline-flex items-center gap-1 text-[11px] font-semibold text-brand hover:underline"
+                  className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-200 transition-colors hover:text-emerald-100"
                 >
                   <Copy className="h-3 w-3" aria-hidden="true" />
                   Copy
                 </button>
               </div>
-              <div className="mt-1.5 break-all font-mono text-[11px] text-ink-soft">{idempotencyKey}</div>
+              <div className="mt-1.5 break-all font-mono text-[11px] leading-relaxed text-[#f8f5ed]/80">
+                {idempotencyKey}
+              </div>
             </div>
 
-            <div className="mt-auto space-y-2 border-t border-line pt-4">
-              <Button variant="secondary" size="sm" className="w-full" onClick={handleNewKey}>
+            <div className="mt-auto space-y-2 border-t border-white/10 pt-4">
+              <button
+                type="button"
+                onClick={handleNewKey}
+                className="inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-lg border border-white/15 bg-white/5 px-3 text-xs font-semibold text-[#f8f5ed] transition-colors hover:bg-white/10"
+              >
                 <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />
                 Generate fresh key
-              </Button>
+              </button>
 
               {lastSettledTx && (
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  className="w-full border-amber-200 bg-warning-soft/60 text-amber-800 hover:bg-warning-soft"
+                <button
+                  type="button"
                   onClick={handleSimulateRealReplay}
                   disabled={replaying || submitting}
-                  loading={replaying}
+                  className="inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-lg border border-amber-300/25 bg-amber-400/10 px-3 text-xs font-semibold text-amber-200 transition-colors hover:bg-amber-400/15 disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  <Repeat className="h-3.5 w-3.5" aria-hidden="true" />
+                  <Repeat
+                    className={`h-3.5 w-3.5 ${replaying ? 'animate-spin' : ''}`}
+                    aria-hidden="true"
+                  />
                   {replaying ? 'Sending replay…' : 'Send live replay (same key)'}
-                </Button>
+                </button>
               )}
 
-              <p className="text-center text-[10px] leading-relaxed text-slate-400">
+              <p className="text-center text-[10px] leading-relaxed text-[#f8f5ed]/35">
                 Replays transmit genuine duplicate HTTP requests to test server idempotency resolution.
               </p>
             </div>
-          </CardBody>
-        </Card>
+          </div>
+        </section>
       </div>
 
       {result && (
-        <Card className="border-emerald-200">
+        <Card className="relative overflow-hidden border-success/30 animate-rise">
+          <span
+            className="pointer-events-none absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-success via-brand to-brass"
+            aria-hidden="true"
+          />
           <CardBody className="space-y-4">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
               <div className="flex items-start gap-3">
@@ -644,7 +668,7 @@ export default function Operations() {
               </div>
             </dl>
 
-            <div className="flex items-start gap-2 rounded-lg border border-line bg-slate-50 p-3 text-xs text-muted">
+            <div className="flex items-start gap-2 rounded-lg border border-line bg-paper/70 p-3 text-xs text-muted">
               <Info className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" aria-hidden="true" />
               <p className="leading-relaxed">
                 Confirming sends a single idempotent request. If the response is lost, retrying with the same

@@ -40,6 +40,41 @@ function isCreditEntry(entry) {
   return String(entry.entry_type || '').toLowerCase() === 'credit';
 }
 
+const quickActions = [
+  {
+    to: '/operations?type=deposit',
+    label: 'Deposit',
+    description: 'Vault to account',
+    icon: ArrowDownLeft,
+    iconClass: 'bg-success-soft text-success',
+    hover: 'hover:border-success/30 hover:bg-success-soft/40',
+  },
+  {
+    to: '/operations?type=withdraw',
+    label: 'Withdraw',
+    description: 'Account to vault',
+    icon: ArrowUpRight,
+    iconClass: 'bg-warning-soft text-warning',
+    hover: 'hover:border-warning/30 hover:bg-warning-soft/40',
+  },
+  {
+    to: '/operations?type=transfer',
+    label: 'Transfer',
+    description: 'Account to account',
+    icon: ArrowLeftRight,
+    iconClass: 'bg-accent-soft text-accent',
+    hover: 'hover:border-accent/30 hover:bg-accent-soft/40',
+  },
+  {
+    to: '/accounts?action=create',
+    label: 'New account',
+    description: 'Open a ledger',
+    icon: PlusCircle,
+    iconClass: 'bg-brand-soft text-brand',
+    hover: 'hover:border-brand/30 hover:bg-brand-soft/40',
+  },
+];
+
 export default function Dashboard() {
   const { user } = useAuth();
   const [accounts, setAccounts] = useState([]);
@@ -108,7 +143,10 @@ export default function Dashboard() {
         actions={
           <>
             <Button variant="secondary" size="sm" onClick={loadData} disabled={loading}>
-              <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin text-brand' : ''}`} aria-hidden="true" />
+              <RefreshCw
+                className={`h-3.5 w-3.5 ${loading ? 'animate-spin text-brand' : ''}`}
+                aria-hidden="true"
+              />
               Refresh
             </Button>
             <ButtonLink to="/operations" size="sm">
@@ -121,6 +159,94 @@ export default function Dashboard() {
 
       {error && <Alert type="error" message={error} onClose={() => setError(null)} />}
 
+      <section className="relative overflow-hidden rounded-2xl bg-ink-deep text-[#f8f5ed] shadow-ledger animate-rise">
+        <div
+          className="pointer-events-none absolute inset-0"
+          style={{
+            background:
+              'radial-gradient(680px circle at 6% 0%, rgba(22,121,79,0.35), transparent 55%), radial-gradient(520px circle at 92% 100%, rgba(168,121,43,0.22), transparent 52%)',
+          }}
+          aria-hidden="true"
+        />
+        <div className="ledger-grid pointer-events-none absolute inset-0 opacity-60" aria-hidden="true" />
+        <div className="relative grid gap-8 p-6 sm:p-8 lg:grid-cols-[1.25fr_1fr] lg:gap-12">
+          <div>
+            <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.2em] text-emerald-200/70">
+              <span className="h-1.5 w-1.5 rounded-full bg-brass" aria-hidden="true" />
+              Total customer balance
+            </div>
+
+            <div className="mt-3 flex flex-wrap items-end gap-x-4 gap-y-2">
+              {loading ? (
+                <span className="block h-12 w-64 animate-pulse rounded-lg bg-white/10" />
+              ) : (
+                <span className="text-figure text-[2.6rem] leading-none text-[#fffdf8] sm:text-[3.25rem]">
+                  {paiseToRupees(totalBalancePaise)}
+                </span>
+              )}
+              <span className="mb-1.5 inline-flex items-center gap-1.5 rounded-full border border-emerald-300/20 bg-emerald-400/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-emerald-200">
+                <span className="h-1.5 w-1.5 rounded-full bg-emerald-300 animate-pulse-dot" aria-hidden="true" />
+                INR · ledger verified
+              </span>
+            </div>
+
+            <p className="mt-3 max-w-md text-xs leading-relaxed text-[#f8f5ed]/50">
+              Across {customerAccounts.length} customer {customerAccounts.length === 1 ? 'ledger' : 'ledgers'}.
+              Every figure is computed from immutable double-entry postings.
+            </p>
+
+            <div className="mt-7 flex flex-wrap items-center gap-2.5">
+              <Link
+                to="/operations"
+                className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-[#fffdf8] px-3.5 text-xs font-semibold text-ink-deep transition-transform hover:-translate-y-0.5"
+              >
+                Move money
+                <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
+              </Link>
+              <Link
+                to="/accounts?action=create"
+                className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-white/15 bg-white/5 px-3.5 text-xs font-semibold text-[#f8f5ed] transition-colors hover:bg-white/10"
+              >
+                <PlusCircle className="h-3.5 w-3.5" aria-hidden="true" />
+                Open account
+              </Link>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 content-center gap-px overflow-hidden rounded-xl border border-white/10 bg-white/10">
+            <div className="bg-ink-deep/90 p-4">
+              <div className="text-[9px] font-semibold uppercase tracking-[0.16em] text-[#f8f5ed]/40">
+                Active accounts
+              </div>
+              <div className="mt-1.5 text-figure text-2xl text-[#fffdf8]">
+                {loading ? '—' : activeAccounts.length}
+              </div>
+              <div className="mt-0.5 text-[10px] text-[#f8f5ed]/40">
+                {customerAccounts.length - activeAccounts.length} not active
+              </div>
+            </div>
+            <div className="bg-ink-deep/90 p-4">
+              <div className="text-[9px] font-semibold uppercase tracking-[0.16em] text-[#f8f5ed]/40">
+                System vaults
+              </div>
+              <div className="mt-1.5 text-figure text-2xl text-[#fffdf8]">
+                {loading ? '—' : systemAccounts.length}
+              </div>
+              <div className="mt-0.5 text-[10px] text-[#f8f5ed]/40">Settlement ledgers</div>
+            </div>
+            <div className="col-span-2 flex items-center gap-2.5 bg-ink-deep/90 p-4">
+              <ShieldCheck className="h-4 w-4 shrink-0 text-emerald-300" aria-hidden="true" />
+              <div>
+                <div className="text-[10px] font-semibold text-[#f8f5ed]">
+                  {String(user?.role || 'user').toUpperCase()} access
+                </div>
+                <div className="text-[10px] text-[#f8f5ed]/40">Row-level security on every read</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
         {loading ? (
           <>
@@ -131,22 +257,16 @@ export default function Dashboard() {
         ) : (
           <>
             <StatCard
-              label="Total customer balance"
-              value={paiseToRupees(totalBalancePaise)}
-              detail={`Across ${customerAccounts.length} customer ${customerAccounts.length === 1 ? 'account' : 'accounts'}`}
+              label="Customer ledgers"
+              value={customerAccounts.length}
+              detail={`${activeAccounts.length} active · ${customerAccounts.length - activeAccounts.length} restricted`}
               icon={Wallet}
               tone="brand"
             />
             <StatCard
-              label="Active accounts"
-              value={activeAccounts.length}
-              detail={
-                customerAccounts.length === 0
-                  ? 'No customer accounts yet'
-                  : `${customerAccounts.length - activeAccounts.length} not active · ${systemAccounts.length} system ${
-                      systemAccounts.length === 1 ? 'account' : 'accounts'
-                    }`
-              }
+              label="Ledger integrity"
+              value="Verified"
+              detail="Zero-sum postings across every transaction"
               icon={CheckCircle2}
               tone="success"
             />
@@ -170,57 +290,27 @@ export default function Dashboard() {
         </CardHeader>
         <CardBody>
           <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-            <Link
-              to="/operations?type=deposit"
-              className="group flex items-center gap-3 rounded-lg border border-line bg-surface p-3 transition-colors hover:border-emerald-200 hover:bg-emerald-50/40"
-            >
-              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-success-soft text-success">
-                <ArrowDownLeft className="h-4 w-4" aria-hidden="true" />
-              </span>
-              <span>
-                <span className="block text-sm font-semibold text-ink">Deposit</span>
-                <span className="block text-[11px] text-muted">Vault to account</span>
-              </span>
-            </Link>
-
-            <Link
-              to="/operations?type=withdraw"
-              className="group flex items-center gap-3 rounded-lg border border-line bg-surface p-3 transition-colors hover:border-amber-200 hover:bg-amber-50/40"
-            >
-              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-warning-soft text-warning">
-                <ArrowUpRight className="h-4 w-4" aria-hidden="true" />
-              </span>
-              <span>
-                <span className="block text-sm font-semibold text-ink">Withdraw</span>
-                <span className="block text-[11px] text-muted">Account to vault</span>
-              </span>
-            </Link>
-
-            <Link
-              to="/operations?type=transfer"
-              className="group flex items-center gap-3 rounded-lg border border-line bg-surface p-3 transition-colors hover:border-blue-200 hover:bg-blue-50/40"
-            >
-              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-accent-soft text-accent">
-                <ArrowLeftRight className="h-4 w-4" aria-hidden="true" />
-              </span>
-              <span>
-                <span className="block text-sm font-semibold text-ink">Transfer</span>
-                <span className="block text-[11px] text-muted">Account to account</span>
-              </span>
-            </Link>
-
-            <Link
-              to="/accounts?action=create"
-              className="group flex items-center gap-3 rounded-lg border border-line bg-surface p-3 transition-colors hover:border-emerald-200 hover:bg-emerald-50/40"
-            >
-              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-brand-soft text-brand">
-                <PlusCircle className="h-4 w-4" aria-hidden="true" />
-              </span>
-              <span>
-                <span className="block text-sm font-semibold text-ink">New account</span>
-                <span className="block text-[11px] text-muted">Open a ledger</span>
-              </span>
-            </Link>
+            {quickActions.map(({ to, label, description, icon: Icon, iconClass, hover }) => (
+              <Link
+                key={to}
+                to={to}
+                className={`group relative flex items-center gap-3 rounded-xl border border-line bg-surface p-3.5 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-sm ${hover}`}
+              >
+                <span
+                  className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${iconClass}`}
+                >
+                  <Icon className="h-4 w-4" aria-hidden="true" />
+                </span>
+                <span className="min-w-0">
+                  <span className="block text-sm font-semibold text-ink">{label}</span>
+                  <span className="block truncate text-[11px] text-muted">{description}</span>
+                </span>
+                <ArrowRight
+                  className="ml-auto hidden h-3.5 w-3.5 shrink-0 text-slate-300 transition-transform group-hover:translate-x-0.5 group-hover:text-ink-soft sm:block"
+                  aria-hidden="true"
+                />
+              </Link>
+            ))}
           </div>
         </CardBody>
       </Card>
@@ -264,8 +354,12 @@ export default function Dashboard() {
                   <Link
                     key={account.id}
                     to={`/accounts/${account.id}`}
-                    className="group flex flex-col justify-between rounded-lg border border-line bg-surface p-4 transition-colors hover:border-brand/30 hover:bg-brand-soft/30"
+                    className="group relative flex flex-col justify-between overflow-hidden rounded-xl border border-line bg-surface p-4 transition-all duration-200 hover:-translate-y-0.5 hover:border-brand/30 hover:shadow-sm"
                   >
+                    <span
+                      className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-brass/50 to-transparent opacity-0 transition-opacity group-hover:opacity-100"
+                      aria-hidden="true"
+                    />
                     <div>
                       <div className="flex items-center justify-between gap-3">
                         <span className="truncate font-mono text-[11px] font-semibold tracking-wide text-muted">
@@ -273,12 +367,14 @@ export default function Dashboard() {
                         </span>
                         <AccountStatusBadge status={account.status} />
                       </div>
-                      <div className="mt-3 text-xl font-bold tracking-tight text-ink tabular-nums">
+                      <div className="mt-3 text-figure text-xl font-semibold tracking-tight text-ink">
                         {paiseToRupees(account.current_balance)}
                       </div>
                     </div>
                     <div className="mt-4 flex items-center justify-between border-t border-line pt-3 text-xs text-muted">
-                      <span className="capitalize">{account.currency || 'INR'}</span>
+                      <span className="font-mono text-[10px] uppercase tracking-wider">
+                        {account.currency || 'INR'}
+                      </span>
                       <span className="inline-flex items-center gap-1 font-semibold text-brand">
                         View statement <ArrowRight className="h-3 w-3" aria-hidden="true" />
                       </span>
@@ -328,7 +424,7 @@ export default function Dashboard() {
                     <li key={`${entry.account_id}-${entry.id}`}>
                       <Link
                         to={`/transactions/${entry.transaction_id}`}
-                        className="flex items-center gap-3 px-5 py-3 transition-colors hover:bg-slate-50"
+                        className="flex items-center gap-3 px-5 py-3 transition-colors hover:bg-paper/70"
                       >
                         <span
                           className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${

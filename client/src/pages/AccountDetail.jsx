@@ -4,7 +4,6 @@ import * as api from '../services/api';
 import { paiseToRupees, formatTimestamp } from '../utils/formatters';
 import {
   Wallet,
-  ArrowLeft,
   FileText,
   Users,
   Settings,
@@ -32,6 +31,7 @@ import {
   EmptyState,
   Field,
   Input,
+  PageHeader,
   PageLoading,
   Pagination,
   Select,
@@ -161,110 +161,129 @@ export default function AccountDetail() {
 
   return (
     <div className="space-y-6 animate-fadeIn">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex items-start gap-3">
-          <Link
-            to="/accounts"
-            className="mt-0.5 inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-line bg-surface text-ink-soft shadow-sm transition-colors hover:bg-slate-50"
-            aria-label="Back to accounts"
-          >
-            <ArrowLeft className="h-4 w-4" aria-hidden="true" />
-          </Link>
-          <div className="min-w-0">
-            <p className="text-[11px] font-semibold uppercase tracking-widest text-muted">Account detail</p>
-            <h1 className="mt-0.5 truncate text-xl font-bold tracking-tight text-ink sm:text-2xl">
-              {account?.account_number || 'Account'}
-            </h1>
-            <p className="mt-1 truncate font-mono text-[11px] text-muted">{id}</p>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-2 sm:justify-end">
-          <Button variant="secondary" size="sm" onClick={loadData} disabled={loading}>
-            <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin text-brand' : ''}`} aria-hidden="true" />
-            Refresh
-          </Button>
-          <ButtonLink to={`/operations?type=deposit&destination=${id}`} size="sm">
-            <ArrowDownLeft className="h-3.5 w-3.5" aria-hidden="true" />
-            Deposit
-          </ButtonLink>
-        </div>
-      </div>
+      <PageHeader
+        eyebrow="Account detail"
+        title={account?.account_number || 'Account'}
+        description="Ledger postings, operational status, and role-based access for this account."
+        backTo="/accounts"
+        backLabel="Back to accounts"
+        meta={
+          <span className="truncate font-mono text-[10px] text-slate-400" title={id}>
+            {id}
+          </span>
+        }
+        actions={
+          <>
+            <Button variant="secondary" size="sm" onClick={loadData} disabled={loading}>
+              <RefreshCw
+                className={`h-3.5 w-3.5 ${loading ? 'animate-spin text-brand' : ''}`}
+                aria-hidden="true"
+              />
+              Refresh
+            </Button>
+            <ButtonLink to={`/operations?type=deposit&destination=${id}`} size="sm">
+              <ArrowDownLeft className="h-3.5 w-3.5" aria-hidden="true" />
+              Deposit
+            </ButtonLink>
+          </>
+        }
+      />
 
       {error && <Alert type="error" message={error} onClose={() => setError(null)} />}
 
       {account && (
-        <Card className="relative overflow-hidden">
+        <section className="relative overflow-hidden rounded-2xl border border-line bg-surface shadow-ledger animate-rise">
+          <span
+            className="pointer-events-none absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-brand via-brand/50 to-brass"
+            aria-hidden="true"
+          />
           <div
-            className="pointer-events-none absolute inset-x-0 top-0 h-24 opacity-70"
+            className="pointer-events-none absolute inset-x-0 top-0 h-40 opacity-70"
             style={{
               background:
-                'radial-gradient(420px circle at 10% 0%, rgba(15,118,110,0.10), transparent 70%), radial-gradient(420px circle at 90% 0%, rgba(37,99,235,0.08), transparent 70%)',
+                'radial-gradient(460px circle at 4% 0%, rgba(14,91,74,0.08), transparent 68%), radial-gradient(420px circle at 96% 0%, rgba(168,121,43,0.10), transparent 66%)',
             }}
             aria-hidden="true"
           />
-          <CardBody className="relative">
-            <div className="flex flex-col gap-6 lg:flex-row lg:items-start lg:justify-between">
-              <div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-brand-soft text-brand">
-                    <Wallet className="h-4 w-4" aria-hidden="true" />
-                  </span>
-                  <span className="font-mono text-sm font-semibold tracking-wide text-ink">
-                    {account.account_number}
-                  </span>
-                  <AccountStatusBadge status={account.status} />
-                  <Badge variant={account.account_type === 'system' ? 'info' : 'neutral'} className="capitalize">
-                    {account.account_type === 'system'
-                      ? (account.system_role_type || 'system vault').toLowerCase().replace(/_/g, ' ')
-                      : 'customer ledger'}
-                  </Badge>
-                </div>
-
-                <div className="mt-5">
-                  <div className="text-[10px] font-semibold uppercase tracking-widest text-muted">
-                    Current ledger balance
-                  </div>
-                  <div className="mt-1 text-3xl font-bold tracking-tight text-ink tabular-nums sm:text-4xl">
-                    {paiseToRupees(account.current_balance)}
-                  </div>
-                </div>
-
-                <dl className="mt-5 grid grid-cols-1 gap-x-8 gap-y-2 text-xs sm:grid-cols-2 lg:grid-cols-3">
-                  <div className="flex items-center justify-between gap-3 border-b border-line pb-2">
-                    <dt className="text-muted">Currency</dt>
-                    <dd className="font-mono font-medium text-ink-soft">{account.currency || 'INR'}</dd>
-                  </div>
-                  <div className="flex items-center justify-between gap-3 border-b border-line pb-2">
-                    <dt className="text-muted">Account type</dt>
-                    <dd className="font-medium capitalize text-ink-soft">{account.account_type}</dd>
-                  </div>
-                  <div className="flex items-center justify-between gap-3 border-b border-line pb-2">
-                    <dt className="text-muted">Opened</dt>
-                    <dd className="text-right font-medium text-ink-soft">{formatTimestamp(account.created_at)}</dd>
-                  </div>
-                </dl>
+          <div className="relative grid gap-6 p-6 sm:p-7 lg:grid-cols-[1.4fr_1fr] lg:gap-10">
+            <div>
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-brand-soft text-brand ring-1 ring-brand/15">
+                  <Wallet className="h-4 w-4" aria-hidden="true" />
+                </span>
+                <span className="font-mono text-sm font-semibold tracking-wide text-ink">
+                  {account.account_number}
+                </span>
+                <AccountStatusBadge status={account.status} />
+                <Badge variant={account.account_type === 'system' ? 'info' : 'neutral'} className="capitalize">
+                  {account.account_type === 'system'
+                    ? (account.system_role_type || 'system vault').toLowerCase().replace(/_/g, ' ')
+                    : 'customer ledger'}
+                </Badge>
               </div>
 
-              <div className="flex flex-wrap items-center gap-2 lg:flex-col lg:items-stretch">
-                <ButtonLink to={`/operations?type=deposit&destination=${id}`} variant="success" size="sm">
-                  <ArrowDownLeft className="h-3.5 w-3.5" aria-hidden="true" />
-                  Deposit
-                </ButtonLink>
-                <ButtonLink to={`/operations?type=withdraw&source=${id}`} variant="secondary" size="sm">
-                  <ArrowUpRight className="h-3.5 w-3.5" aria-hidden="true" />
-                  Withdraw
-                </ButtonLink>
-                <ButtonLink to={`/operations?type=transfer&source=${id}`} variant="secondary" size="sm">
-                  Transfer
-                </ButtonLink>
+              <div className="mt-6">
+                <div className="flex items-center gap-2 text-[9px] font-semibold uppercase tracking-[0.18em] text-muted">
+                  <span className="h-1 w-4 rounded-full bg-brass" aria-hidden="true" />
+                  Current ledger balance
+                </div>
+                <div className="mt-2 text-figure text-[2.4rem] leading-none text-ink sm:text-[3rem]">
+                  {paiseToRupees(account.current_balance)}
+                </div>
+                <p className="mt-2 text-[11px] text-muted">
+                  Derived from {formatTimestamp(account.created_at)} · all postings reconciled
+                </p>
               </div>
+
+              <dl className="mt-6 grid grid-cols-1 gap-x-8 gap-y-2 text-xs sm:grid-cols-3">
+                <div className="flex items-center justify-between gap-3 border-b border-line pb-2">
+                  <dt className="text-muted">Currency</dt>
+                  <dd className="font-mono font-medium text-ink-soft">{account.currency || 'INR'}</dd>
+                </div>
+                <div className="flex items-center justify-between gap-3 border-b border-line pb-2">
+                  <dt className="text-muted">Account type</dt>
+                  <dd className="font-medium capitalize text-ink-soft">{account.account_type}</dd>
+                </div>
+                <div className="flex items-center justify-between gap-3 border-b border-line pb-2">
+                  <dt className="text-muted">Opened</dt>
+                  <dd className="text-right font-medium text-ink-soft">{formatTimestamp(account.created_at)}</dd>
+                </div>
+              </dl>
             </div>
-          </CardBody>
-        </Card>
+
+            <div className="flex flex-col justify-between rounded-xl border border-line bg-paper/70 p-4">
+              <div>
+                <div className="text-[9px] font-semibold uppercase tracking-[0.16em] text-muted">
+                  Ledger actions
+                </div>
+                <div className="mt-3 flex flex-col gap-2">
+                  <ButtonLink to={`/operations?type=deposit&destination=${id}`} variant="success" size="sm">
+                    <ArrowDownLeft className="h-3.5 w-3.5" aria-hidden="true" />
+                    Deposit into this account
+                  </ButtonLink>
+                  <ButtonLink to={`/operations?type=withdraw&source=${id}`} variant="secondary" size="sm">
+                    <ArrowUpRight className="h-3.5 w-3.5" aria-hidden="true" />
+                    Withdraw from this account
+                  </ButtonLink>
+                  <ButtonLink to={`/operations?type=transfer&source=${id}`} variant="secondary" size="sm">
+                    <ArrowUpRight className="h-3.5 w-3.5 rotate-45" aria-hidden="true" />
+                    Transfer to another ledger
+                  </ButtonLink>
+                </div>
+              </div>
+              <p className="mt-4 border-t border-line pt-3 text-[10px] leading-relaxed text-muted">
+                Every movement posts a balanced debit and credit. Balances never change in isolation.
+              </p>
+            </div>
+          </div>
+        </section>
       )}
 
-      <div className="flex gap-1 overflow-x-auto border-b border-line" role="tablist" aria-label="Account sections">
+      <div
+        className="flex gap-1 overflow-x-auto rounded-t-xl border-b border-line bg-paper/50 px-2"
+        role="tablist"
+        aria-label="Account sections"
+      >
         {tabs.map(({ id: tabId, label, icon: Icon }) => (
           <button
             key={tabId}
@@ -272,13 +291,16 @@ export default function AccountDetail() {
             role="tab"
             aria-selected={activeTab === tabId}
             onClick={() => setActiveTab(tabId)}
-            className={`inline-flex shrink-0 items-center gap-2 border-b-2 px-3 py-2.5 text-sm font-semibold transition-colors ${
+            className={`-mb-px inline-flex shrink-0 items-center gap-2 border-b-2 px-3.5 py-3 text-[13px] font-semibold transition-colors ${
               activeTab === tabId
-                ? 'border-brand text-brand'
+                ? 'border-brass text-ink'
                 : 'border-transparent text-muted hover:text-ink'
             }`}
           >
-            <Icon className="h-4 w-4" aria-hidden="true" />
+            <Icon
+              className={`h-4 w-4 ${activeTab === tabId ? 'text-brand' : 'text-slate-400'}`}
+              aria-hidden="true"
+            />
             {label}
           </button>
         ))}
@@ -346,7 +368,7 @@ export default function AccountDetail() {
             <>
               <div className="hidden overflow-x-auto md:block">
                 <table className="w-full text-left text-xs">
-                  <thead className="border-b border-line bg-slate-50/80 text-[10px] font-semibold uppercase tracking-widest text-muted">
+                  <thead className="border-b border-line bg-paper/80 text-[10px] font-semibold uppercase tracking-widest text-muted">
                     <tr>
                       <th className="px-5 py-3">Seq</th>
                       <th className="px-5 py-3">Timestamp</th>
@@ -360,7 +382,7 @@ export default function AccountDetail() {
                     {filteredStatement.map((entry) => {
                       const credit = isCreditEntry(entry);
                       return (
-                        <tr key={entry.id} className="transition-colors hover:bg-slate-50">
+                        <tr key={entry.id} className="transition-colors hover:bg-paper/60">
                           <td className="px-5 py-3 font-mono text-muted">{entry.sequence_number}</td>
                           <td className="whitespace-nowrap px-5 py-3 text-muted">
                             {formatTimestamp(entry.created_at)}
@@ -541,7 +563,7 @@ export default function AccountDetail() {
           </CardHeader>
 
           <CardBody className="space-y-4">
-            <div className="flex items-start gap-3 rounded-lg border border-blue-200 bg-accent-soft/60 p-3 text-xs text-blue-900">
+            <div className="flex items-start gap-3 rounded-xl border border-accent/20 bg-accent-soft/70 p-3.5 text-xs text-accent">
               <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-accent" aria-hidden="true" />
               <div>
                 <p className="font-semibold">Integrity guard</p>
@@ -552,7 +574,7 @@ export default function AccountDetail() {
               </div>
             </div>
 
-            <div className="flex items-start gap-3 rounded-lg border border-line bg-slate-50 p-3 text-xs text-muted">
+            <div className="flex items-start gap-3 rounded-xl border border-line bg-paper/70 p-3.5 text-xs text-muted">
               <Info className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" aria-hidden="true" />
               <p className="leading-relaxed">
                 Membership listing is not exposed by the current API. Assign access using the member&apos;s user

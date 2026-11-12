@@ -15,7 +15,7 @@ export function Tooltip({ label, children, side = 'top', className = '' }) {
       {children}
       <span
         role="tooltip"
-        className={`pointer-events-none absolute z-50 hidden whitespace-nowrap rounded-md bg-ink px-2 py-1 text-[11px] font-medium text-white shadow-lg group-hover/tt:block group-focus-within/tt:block ${sideClass}`}
+        className={`pointer-events-none absolute z-50 hidden max-w-[220px] whitespace-normal rounded-lg bg-[#0b1712] px-2.5 py-1.5 text-[11px] font-medium leading-snug text-[#f8f5ed] shadow-xl ring-1 ring-white/10 group-hover/tt:block group-focus-within/tt:block ${sideClass}`}
       >
         {label}
       </span>

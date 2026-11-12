@@ -26,22 +26,26 @@ function SectionHeading({ eyebrow, title, description, align = 'left', dark = fa
   return (
     <div className={align === 'center' ? 'mx-auto max-w-2xl text-center' : 'max-w-2xl'}>
       <p
-        className={`inline-flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.18em] ${
-          dark ? 'text-emerald-300' : 'text-brand'
+        className={`inline-flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.2em] ${
+          dark ? 'text-emerald-200/80' : 'text-brass'
         }`}
       >
-        <span className={`h-1.5 w-1.5 rounded-full ${dark ? 'bg-emerald-400' : 'bg-brand'}`} />
+        <span className={`h-1.5 w-1.5 rounded-full ${dark ? 'bg-brass' : 'bg-brass'}`} />
         {eyebrow}
       </p>
       <h2
-        className={`mt-4 text-3xl font-bold leading-tight tracking-tight sm:text-4xl ${
-          dark ? 'text-white' : 'text-ink'
+        className={`mt-4 font-display text-[2rem] font-semibold leading-[1.1] tracking-tight sm:text-[2.5rem] ${
+          dark ? 'text-[#fffdf8]' : 'text-ink'
         }`}
       >
         {title}
       </h2>
       {description && (
-        <p className={`mt-4 text-sm leading-relaxed sm:text-base ${dark ? 'text-white/60' : 'text-muted'}`}>
+        <p
+          className={`mt-4 text-sm leading-relaxed sm:text-[15px] ${
+            dark ? 'text-[#f8f5ed]/55' : 'text-muted'
+          }`}
+        >
           {description}
         </p>
       )}
@@ -54,37 +58,37 @@ const trustHighlights = [
     icon: Layers,
     title: 'Double-entry ledger architecture',
     description: 'Every posted movement is represented by balanced debit and credit entries.',
-    iconClass: 'bg-emerald-50 text-emerald-700 ring-emerald-100',
+    iconClass: 'bg-brand-soft text-brand ring-brand/15',
   },
   {
     icon: RefreshCw,
     title: 'Idempotent transaction processing',
     description: 'Retried requests resolve safely without creating duplicate movements.',
-    iconClass: 'bg-blue-50 text-blue-700 ring-blue-100',
+    iconClass: 'bg-accent-soft text-accent ring-accent/15',
   },
   {
     icon: UsersRound,
     title: 'Role-based access control',
     description: 'Customers, auditors, and administrators see only what their role permits.',
-    iconClass: 'bg-violet-50 text-violet-700 ring-violet-100',
+    iconClass: 'bg-brass-soft text-brass ring-brass/20',
   },
   {
     icon: Eye,
     title: 'Transparent transaction records',
     description: 'Status, postings, and references stay visible for inspection.',
-    iconClass: 'bg-cyan-50 text-cyan-700 ring-cyan-100',
+    iconClass: 'bg-success-soft text-success ring-success/15',
   },
 ];
 
 export function TrustHighlights() {
   return (
-    <section className="border-b border-line bg-white py-16 sm:py-20">
+    <section className="border-b border-line bg-surface py-16 sm:py-20">
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
         <h2 className="sr-only">Built on accountable foundations</h2>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           {trustHighlights.map((highlight, index) => (
             <Reveal key={highlight.title} delay={index * 70} className="h-full">
-              <article className="group flex h-full items-start gap-3 rounded-2xl border border-line bg-surface p-5 shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-md">
+              <article className="group flex h-full items-start gap-3 rounded-2xl border border-line bg-canvas/60 p-5 transition-all duration-300 hover:-translate-y-0.5 hover:border-line-strong hover:shadow-sm">
                 <span
                   className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ring-1 transition-transform duration-300 group-hover:scale-105 ${highlight.iconClass}`}
                 >
@@ -106,63 +110,69 @@ export function TrustHighlights() {
 const features = [
   {
     icon: ArrowLeftRight,
-    title: 'Smart Money Movement',
-    description: 'Move money through deposits, withdrawals, and transfers with clear transaction status at every step.',
+    title: 'Smart money movement',
+    description:
+      'Move money through deposits, withdrawals, and transfers with clear transaction status at every step.',
     points: ['Deposits, withdrawals, and transfers', 'Clear transaction status', 'Consistent money representation'],
-    iconClass: 'bg-emerald-50 text-emerald-700 ring-emerald-100',
-    glowClass: 'bg-emerald-400/25',
-    borderClass: 'hover:border-emerald-200',
-    lineClass: 'from-emerald-400 to-cyan-400',
+    iconClass: 'bg-brand-soft text-brand ring-brand/15',
+    glowClass: 'bg-brand/15',
+    borderClass: 'hover:border-brand/30',
+    lineClass: 'from-brand to-brass',
   },
   {
     icon: BookOpenCheck,
-    title: 'Verifiable Ledger',
-    description: 'Inspect the debit and credit entries behind every posted transaction and follow the movement end to end.',
+    title: 'Verifiable ledger',
+    description:
+      'Inspect the debit and credit entries behind every posted transaction and follow the movement end to end.',
     points: ['Matching debit and credit entries', 'Double-entry integrity', 'Transparent transaction details'],
-    iconClass: 'bg-blue-50 text-blue-700 ring-blue-100',
-    glowClass: 'bg-blue-400/25',
-    borderClass: 'hover:border-blue-200',
-    lineClass: 'from-blue-400 to-cyan-400',
+    iconClass: 'bg-accent-soft text-accent ring-accent/15',
+    glowClass: 'bg-accent/15',
+    borderClass: 'hover:border-accent/30',
+    lineClass: 'from-accent to-brand',
   },
   {
     icon: RefreshCw,
-    title: 'Idempotent Transactions',
-    description: 'Retry a request without worrying about duplicate execution. Replays resolve to the original result.',
+    title: 'Idempotent transactions',
+    description:
+      'Retry a request without worrying about duplicate execution. Replays resolve to the original result.',
     points: ['Safer request retries', 'Duplicate-request protection', 'Clear replay behaviour'],
-    iconClass: 'bg-violet-50 text-violet-700 ring-violet-100',
-    glowClass: 'bg-violet-400/25',
-    borderClass: 'hover:border-violet-200',
-    lineClass: 'from-violet-400 to-fuchsia-400',
+    iconClass: 'bg-brass-soft text-brass ring-brass/20',
+    glowClass: 'bg-brass/20',
+    borderClass: 'hover:border-brass/30',
+    lineClass: 'from-brass to-brand',
   },
   {
     icon: UsersRound,
-    title: 'Access Control',
-    description: 'Keep account access intentional with account-holder permissions, auditor visibility, and admin controls.',
+    title: 'Access control',
+    description:
+      'Keep account access intentional with account-holder permissions, auditor visibility, and admin controls.',
     points: ['Account-holder permissions', 'Auditor read-only access', 'Administrative controls'],
-    iconClass: 'bg-amber-50 text-amber-700 ring-amber-100',
-    glowClass: 'bg-amber-400/25',
-    borderClass: 'hover:border-amber-200',
-    lineClass: 'from-amber-400 to-orange-400',
+    iconClass: 'bg-success-soft text-success ring-success/15',
+    glowClass: 'bg-success/15',
+    borderClass: 'hover:border-success/30',
+    lineClass: 'from-success to-brand',
   },
   {
     icon: FileText,
-    title: 'Account Statements',
-    description: 'Review transaction history with running balances and clear references for every ledger entry.',
+    title: 'Account statements',
+    description:
+      'Review transaction history with running balances and clear references for every ledger entry.',
     points: ['Transaction history', 'Running balances', 'Clear transaction references'],
-    iconClass: 'bg-cyan-50 text-cyan-700 ring-cyan-100',
-    glowClass: 'bg-cyan-400/25',
-    borderClass: 'hover:border-cyan-200',
-    lineClass: 'from-cyan-400 to-sky-400',
+    iconClass: 'bg-warning-soft text-warning ring-warning/15',
+    glowClass: 'bg-warning/15',
+    borderClass: 'hover:border-warning/30',
+    lineClass: 'from-warning to-brass',
   },
   {
     icon: Activity,
-    title: 'Financial Oversight',
-    description: 'Monitor transactions, run reversal workflows, and keep system health visible from one workspace.',
+    title: 'Financial oversight',
+    description:
+      'Monitor transactions, run reversal workflows, and keep system health visible from one workspace.',
     points: ['Transaction monitoring', 'Reversal workflows', 'System health visibility'],
-    iconClass: 'bg-rose-50 text-rose-700 ring-rose-100',
-    glowClass: 'bg-rose-400/25',
-    borderClass: 'hover:border-rose-200',
-    lineClass: 'from-rose-400 to-pink-400',
+    iconClass: 'bg-danger-soft text-danger ring-danger/15',
+    glowClass: 'bg-danger/15',
+    borderClass: 'hover:border-danger/30',
+    lineClass: 'from-danger to-brass',
   },
 ];
 
@@ -183,7 +193,7 @@ export function FeatureShowcase() {
           {features.map((feature, index) => (
             <Reveal key={feature.title} delay={(index % 3) * 80} className="h-full">
               <article
-                className={`group relative flex h-full flex-col overflow-hidden rounded-2xl border border-line bg-surface p-6 shadow-sm transition-all duration-300 hover:-translate-y-1 hover:shadow-[0_24px_60px_-24px_rgba(15,27,45,0.24)] ${feature.borderClass}`}
+                className={`group relative flex h-full flex-col overflow-hidden rounded-2xl border border-line bg-surface p-6 transition-all duration-300 hover:-translate-y-1 hover:shadow-[0_24px_60px_-24px_rgba(20,33,28,0.18)] ${feature.borderClass}`}
               >
                 <div
                   className={`pointer-events-none absolute -right-8 -top-8 h-28 w-28 rounded-full opacity-0 blur-2xl transition-opacity duration-300 group-hover:opacity-100 ${feature.glowClass}`}
@@ -193,12 +203,14 @@ export function FeatureShowcase() {
                 >
                   <feature.icon className="h-5 w-5" aria-hidden="true" />
                 </span>
-                <h3 className="relative mt-4 text-base font-bold tracking-tight text-ink">{feature.title}</h3>
+                <h3 className="relative mt-4 font-display text-lg font-semibold tracking-tight text-ink">
+                  {feature.title}
+                </h3>
                 <p className="relative mt-2 text-sm leading-relaxed text-muted">{feature.description}</p>
                 <ul className="relative mt-4 space-y-2">
                   {feature.points.map((point) => (
                     <li key={point} className="flex items-start gap-2 text-xs text-ink-soft">
-                      <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-600" aria-hidden="true" />
+                      <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-brand" aria-hidden="true" />
                       <span>{point}</span>
                     </li>
                   ))}
@@ -240,7 +252,7 @@ const steps = [
 
 export function HowItWorks() {
   return (
-    <section id="how-it-works" className="scroll-mt-24 bg-white py-20 sm:py-24">
+    <section id="how-it-works" className="scroll-mt-24 border-y border-line bg-surface py-20 sm:py-24">
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
         <Reveal>
           <SectionHeading
@@ -256,9 +268,9 @@ export function HowItWorks() {
             <svg className="h-2 w-full" viewBox="0 0 1000 8" preserveAspectRatio="none">
               <defs>
                 <linearGradient id="step-flow-gradient" x1="0" x2="1" y1="0" y2="0">
-                  <stop offset="0%" stopColor="#34d399" />
-                  <stop offset="50%" stopColor="#22d3ee" />
-                  <stop offset="100%" stopColor="#818cf8" />
+                  <stop offset="0%" stopColor="#a8792b" />
+                  <stop offset="55%" stopColor="#16794f" />
+                  <stop offset="100%" stopColor="#0e5b4a" />
                 </linearGradient>
               </defs>
               <line
@@ -278,16 +290,18 @@ export function HowItWorks() {
             {steps.map((step, index) => (
               <li key={step.title} className="relative">
                 <Reveal delay={index * 120} className="h-full">
-                  <div className="group flex h-full flex-col rounded-2xl border border-line bg-surface p-6 shadow-sm transition-all duration-300 hover:-translate-y-1 hover:border-slate-300 hover:shadow-lg">
+                  <div className="group flex h-full flex-col rounded-2xl border border-line bg-canvas/60 p-6 transition-all duration-300 hover:-translate-y-1 hover:border-line-strong hover:shadow-md">
                     <div className="flex items-center justify-between gap-3">
-                      <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br from-[#0f766e] to-[#2563eb] text-white shadow-lg shadow-emerald-900/10">
+                      <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-ink-deep text-emerald-200 shadow-sm">
                         <step.icon className="h-5 w-5" aria-hidden="true" />
                       </span>
-                      <span className="font-mono text-xs font-bold tracking-widest text-slate-300">
+                      <span className="font-display text-2xl font-semibold italic tracking-tight text-brass/50">
                         0{index + 1}
                       </span>
                     </div>
-                    <h3 className="mt-5 text-base font-bold tracking-tight text-ink">{step.title}</h3>
+                    <h3 className="mt-5 font-display text-lg font-semibold tracking-tight text-ink">
+                      {step.title}
+                    </h3>
                     <p className="mt-2 text-sm font-medium leading-relaxed text-ink-soft">{step.description}</p>
                     <p className="mt-2 text-xs leading-relaxed text-muted">{step.detail}</p>
                   </div>
@@ -324,31 +338,34 @@ export function LedgerTransparency() {
           </Reveal>
 
           <Reveal delay={100}>
-            <div className="relative overflow-hidden rounded-3xl border border-white/10 bg-[#07111f] p-5 text-white shadow-[0_32px_90px_-28px_rgba(15,27,45,0.55)] sm:p-7">
+            <div className="relative overflow-hidden rounded-3xl border border-white/10 bg-ink-deep p-5 text-[#f8f5ed] shadow-[0_32px_90px_-28px_rgba(11,23,18,0.6)] sm:p-7">
               <div
-                className="pointer-events-none absolute inset-0 opacity-80"
+                className="pointer-events-none absolute inset-0 opacity-90"
                 style={{
                   background:
-                    'radial-gradient(500px circle at 12% 0%, rgba(16,185,129,0.18), transparent 58%), radial-gradient(500px circle at 90% 100%, rgba(59,130,246,0.2), transparent 55%)',
+                    'radial-gradient(500px circle at 8% 0%, rgba(22,121,79,0.28), transparent 56%), radial-gradient(500px circle at 92% 100%, rgba(168,121,43,0.22), transparent 55%)',
                 }}
                 aria-hidden="true"
               />
+              <div className="ledger-grid pointer-events-none absolute inset-0 opacity-40" aria-hidden="true" />
               <div className="relative">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div>
-                    <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-white/40">
+                    <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[#f8f5ed]/40">
                       Illustrative ledger entry
                     </p>
-                    <p className="mt-1 text-sm font-semibold text-white">Transfer · ₹500.00</p>
+                    <p className="mt-1 font-display text-base font-semibold text-[#fffdf8]">
+                      Transfer · ₹500.00
+                    </p>
                   </div>
-                  <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-400/20 bg-emerald-400/10 px-3 py-1 text-[10px] font-semibold uppercase tracking-wide text-emerald-300">
+                  <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-300/20 bg-emerald-400/10 px-3 py-1 text-[10px] font-semibold uppercase tracking-wide text-emerald-200">
                     <CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" />
                     Balanced
                   </span>
                 </div>
 
                 <div className="mt-6 overflow-hidden rounded-xl border border-white/10 bg-white/[0.04]">
-                  <div className="grid grid-cols-[1fr_auto] gap-4 border-b border-white/10 px-4 py-2.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-white/35">
+                  <div className="grid grid-cols-[1fr_auto] gap-4 border-b border-white/10 px-4 py-2.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-[#f8f5ed]/35">
                     <span>Account</span>
                     <span>Entry</span>
                   </div>
@@ -358,10 +375,10 @@ export function LedgerTransparency() {
                     className="grid grid-cols-[1fr_auto] items-center gap-4 border-b border-white/10 px-4 py-4"
                   >
                     <span className="min-w-0">
-                      <span className="block truncate text-sm font-medium text-white">Source account</span>
-                      <span className="mt-0.5 block text-[10px] text-white/40">Debit</span>
+                      <span className="block truncate text-sm font-medium text-[#fffdf8]">Source account</span>
+                      <span className="mt-0.5 block text-[10px] text-[#f8f5ed]/40">Debit</span>
                     </span>
-                    <span className="text-sm font-bold tabular-nums text-rose-300">−₹500.00</span>
+                    <span className="text-sm font-semibold tabular-nums text-rose-300">−₹500.00</span>
                   </Reveal>
                   <Reveal
                     as="div"
@@ -369,19 +386,19 @@ export function LedgerTransparency() {
                     className="grid grid-cols-[1fr_auto] items-center gap-4 border-b border-white/10 px-4 py-4"
                   >
                     <span className="min-w-0">
-                      <span className="block truncate text-sm font-medium text-white">Destination account</span>
-                      <span className="mt-0.5 block text-[10px] text-white/40">Credit</span>
+                      <span className="block truncate text-sm font-medium text-[#fffdf8]">Destination account</span>
+                      <span className="mt-0.5 block text-[10px] text-[#f8f5ed]/40">Credit</span>
                     </span>
-                    <span className="text-sm font-bold tabular-nums text-emerald-300">+₹500.00</span>
+                    <span className="text-sm font-semibold tabular-nums text-emerald-300">+₹500.00</span>
                   </Reveal>
                   <div className="flex items-center justify-between gap-4 px-4 py-4">
-                    <span className="text-xs font-semibold uppercase tracking-[0.16em] text-white/40">Total</span>
-                    <span className="text-lg font-bold tabular-nums text-white">₹0.00</span>
+                    <span className="text-xs font-semibold uppercase tracking-[0.16em] text-[#f8f5ed]/40">Total</span>
+                    <span className="text-figure text-lg text-[#fffdf8]">₹0.00</span>
                   </div>
                 </div>
 
-                <div className="mt-5 flex items-center gap-2 text-[11px] text-white/45">
-                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" aria-hidden="true" />
+                <div className="mt-5 flex items-center gap-2 text-[11px] text-[#f8f5ed]/45">
+                  <span className="h-1.5 w-1.5 rounded-full bg-brass" aria-hidden="true" />
                   Sample data · Illustrative only · Not a live transaction
                 </div>
               </div>
@@ -423,14 +440,17 @@ const securityPoints = [
 
 export function SecuritySection() {
   return (
-    <section id="security" className="relative scroll-mt-24 overflow-hidden bg-[#07111f] py-20 text-white sm:py-24">
-      <div className="landing-grid pointer-events-none absolute inset-0" aria-hidden="true" />
+    <section
+      id="security"
+      className="relative scroll-mt-24 overflow-hidden bg-ink-deep py-20 text-[#f8f5ed] sm:py-24"
+    >
+      <div className="ledger-grid pointer-events-none absolute inset-0 opacity-50" aria-hidden="true" />
       <div
-        className="pointer-events-none absolute -left-24 top-16 h-72 w-72 rounded-full bg-emerald-500/15 blur-3xl animate-orb"
+        className="pointer-events-none absolute -left-24 top-16 h-72 w-72 rounded-full bg-emerald-500/10 blur-3xl animate-orb"
         aria-hidden="true"
       />
       <div
-        className="pointer-events-none absolute -right-24 bottom-10 h-80 w-80 rounded-full bg-blue-500/15 blur-3xl animate-orb"
+        className="pointer-events-none absolute -right-24 bottom-10 h-80 w-80 rounded-full bg-brass/10 blur-3xl animate-orb"
         style={{ animationDelay: '2.4s' }}
         aria-hidden="true"
       />
@@ -448,7 +468,7 @@ export function SecuritySection() {
               <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-400/10 text-emerald-300 ring-1 ring-emerald-400/20">
                 <ShieldCheck className="h-5 w-5" aria-hidden="true" />
               </span>
-              <p className="text-xs leading-relaxed text-white/55">
+              <p className="text-xs leading-relaxed text-[#f8f5ed]/55">
                 Controls are enforced in the application and database layers that handle financial operations.
               </p>
             </div>
@@ -462,8 +482,8 @@ export function SecuritySection() {
                     <point.icon className="h-4 w-4" aria-hidden="true" />
                   </span>
                   <span>
-                    <h3 className="text-sm font-semibold text-white">{point.title}</h3>
-                    <p className="mt-1 text-xs leading-relaxed text-white/45">{point.description}</p>
+                    <h3 className="text-sm font-semibold text-[#fffdf8]">{point.title}</h3>
+                    <p className="mt-1 text-xs leading-relaxed text-[#f8f5ed]/45">{point.description}</p>
                   </span>
                 </div>
               </Reveal>
@@ -479,23 +499,26 @@ const principles = [
   {
     icon: Eye,
     title: 'Explainable by default',
-    description: 'The ledger, transaction status, and posting context stay visible instead of disappearing behind a balance.',
+    description:
+      'The ledger, transaction status, and posting context stay visible instead of disappearing behind a balance.',
   },
   {
     icon: Scale,
     title: 'Exact by design',
-    description: 'Money is handled in integer minor units, keeping calculations consistent from request to record.',
+    description:
+      'Money is handled in integer minor units, keeping calculations consistent from request to record.',
   },
   {
     icon: ClipboardCheck,
     title: 'Accountable operations',
-    description: 'Permissions, idempotency, and review workflows make every movement easier to understand and verify.',
+    description:
+      'Permissions, idempotency, and review workflows make every movement easier to understand and verify.',
   },
 ];
 
 export function AboutSection() {
   return (
-    <section id="about" className="scroll-mt-24 bg-white py-20 sm:py-24">
+    <section id="about" className="scroll-mt-24 bg-surface py-20 sm:py-24">
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
         <div className="grid gap-12 lg:grid-cols-[0.9fr_1.1fr] lg:items-start">
           <Reveal>
@@ -513,12 +536,12 @@ export function AboutSection() {
           <div className="grid gap-3">
             {principles.map((principle, index) => (
               <Reveal key={principle.title} delay={index * 90}>
-                <div className="group flex items-start gap-4 rounded-2xl border border-line bg-surface p-5 shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-md">
-                  <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-brand-soft text-brand ring-1 ring-emerald-100 transition-transform duration-300 group-hover:scale-105">
+                <div className="group flex items-start gap-4 rounded-2xl border border-line bg-canvas/60 p-5 transition-all duration-300 hover:-translate-y-0.5 hover:border-line-strong hover:shadow-sm">
+                  <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-brand-soft text-brand ring-1 ring-brand/15 transition-transform duration-300 group-hover:scale-105">
                     <principle.icon className="h-5 w-5" aria-hidden="true" />
                   </span>
                   <span>
-                    <h3 className="text-sm font-bold text-ink">{principle.title}</h3>
+                    <h3 className="font-display text-base font-semibold text-ink">{principle.title}</h3>
                     <p className="mt-1 text-xs leading-relaxed text-muted">{principle.description}</p>
                   </span>
                 </div>
@@ -533,40 +556,45 @@ export function AboutSection() {
 
 export function FinalCta() {
   return (
-    <section className="bg-[#07111f] px-4 pb-20 pt-4 sm:px-6 sm:pb-24 lg:px-8">
+    <section className="bg-canvas px-4 pb-20 pt-4 sm:px-6 sm:pb-24 lg:px-8">
       <Reveal className="mx-auto max-w-7xl">
-        <div className="relative overflow-hidden rounded-3xl border border-white/10 bg-gradient-to-br from-[#0f766e] via-[#0e7490] to-[#1d4ed8] px-6 py-14 text-center shadow-[0_40px_100px_-30px_rgba(29,78,216,0.55)] sm:px-10 sm:py-16">
+        <div className="relative overflow-hidden rounded-3xl bg-ink-deep px-6 py-14 text-center shadow-[0_40px_100px_-36px_rgba(11,23,18,0.6)] sm:px-10 sm:py-16">
           <div
-            className="pointer-events-none absolute inset-0 opacity-30"
+            className="pointer-events-none absolute inset-0 opacity-90"
             style={{
               background:
-                'radial-gradient(420px circle at 10% 20%, rgba(255,255,255,0.4), transparent 55%), radial-gradient(420px circle at 90% 80%, rgba(34,211,238,0.45), transparent 55%)',
+                'radial-gradient(520px circle at 8% 0%, rgba(22,121,79,0.28), transparent 55%), radial-gradient(520px circle at 92% 100%, rgba(168,121,43,0.24), transparent 55%)',
             }}
             aria-hidden="true"
           />
-          <div className="landing-grid pointer-events-none absolute inset-0 opacity-30" aria-hidden="true" />
+          <div className="ledger-grid pointer-events-none absolute inset-0 opacity-40" aria-hidden="true" />
           <div className="relative mx-auto max-w-2xl">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-white/60">Start with the ledger</p>
-            <h2 className="mt-3 text-3xl font-bold leading-tight tracking-tight text-white sm:text-4xl lg:text-5xl">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-brass">
+              Start with the ledger
+            </p>
+            <h2 className="mt-3 font-display text-[2.1rem] font-semibold leading-[1.08] tracking-tight text-[#fffdf8] sm:text-[2.75rem] lg:text-[3.1rem]">
               Make every movement count.
             </h2>
-            <p className="mx-auto mt-4 max-w-xl text-sm leading-relaxed text-white/70 sm:text-base">
+            <p className="mx-auto mt-4 max-w-xl text-sm leading-relaxed text-[#f8f5ed]/60 sm:text-base">
               Experience financial operations built around accountability, transparency, and trust.
             </p>
             <div className="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">
               <Link
                 to="/register"
-                className="group inline-flex w-full items-center justify-center gap-2 rounded-xl bg-white px-5 py-3 text-sm font-bold text-[#07111f] shadow-lg transition-all duration-200 hover:bg-emerald-50 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-[#0f766e] sm:w-auto"
+                className="group inline-flex w-full items-center justify-center gap-2 rounded-xl bg-[#fffdf8] px-5 py-3 text-sm font-semibold text-ink-deep shadow-lg transition-all duration-200 hover:-translate-y-0.5 hover:bg-[#f3f0e8] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300 focus-visible:ring-offset-2 focus-visible:ring-offset-[#0b1712] sm:w-auto"
               >
-                Get Started
-                <ArrowRight className="h-4 w-4 transition-transform duration-200 group-hover:translate-x-0.5" aria-hidden="true" />
+                Open your ledger
+                <ArrowRight
+                  className="h-4 w-4 transition-transform duration-200 group-hover:translate-x-0.5"
+                  aria-hidden="true"
+                />
               </Link>
               <Link
                 to="/login"
-                className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-white/25 bg-white/5 px-5 py-3 text-sm font-semibold text-white transition-colors hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white sm:w-auto"
+                className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-white/20 bg-white/5 px-5 py-3 text-sm font-semibold text-[#fffdf8] transition-colors hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300 sm:w-auto"
               >
                 <LogIn className="h-4 w-4" aria-hidden="true" />
-                Log In
+                Sign in
               </Link>
             </div>
           </div>

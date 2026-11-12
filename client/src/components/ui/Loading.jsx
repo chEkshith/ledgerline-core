@@ -1,24 +1,38 @@
 import React from 'react';
 
 export function Skeleton({ className = '' }) {
-  return <div className={`animate-pulse rounded-md bg-slate-200/70 ${className}`} aria-hidden="true" />;
+  return (
+    <div
+      className={`relative overflow-hidden rounded-md bg-slate-200/70 ${className}`}
+      aria-hidden="true"
+    >
+      <span className="shimmer absolute inset-0" />
+    </div>
+  );
 }
 
 export function PageLoading({ label = 'Loading' }) {
   return (
-    <div className="flex min-h-64 flex-col items-center justify-center gap-3 text-sm text-muted" role="status" aria-live="polite">
-      <div className="h-6 w-6 animate-spin rounded-full border-2 border-line border-t-brand" aria-hidden="true" />
-      <span>{label}</span>
+    <div
+      className="flex min-h-64 flex-col items-center justify-center gap-4 text-sm text-muted"
+      role="status"
+      aria-live="polite"
+    >
+      <span className="relative flex h-10 w-10 items-center justify-center">
+        <span className="absolute h-10 w-10 animate-spin rounded-full border-2 border-line border-t-brand" />
+        <span className="h-2 w-2 rounded-full bg-brass" aria-hidden="true" />
+      </span>
+      <span className="font-medium">{label}</span>
     </div>
   );
 }
 
 export function StatCardSkeleton() {
   return (
-    <div className="rounded-xl border border-line bg-surface p-5">
+    <div className="rounded-2xl border border-line bg-surface p-5">
       <div className="flex items-center justify-between">
         <Skeleton className="h-3 w-24" />
-        <Skeleton className="h-8 w-8 rounded-lg" />
+        <Skeleton className="h-9 w-9 rounded-xl" />
       </div>
       <Skeleton className="mt-4 h-8 w-36" />
       <Skeleton className="mt-3 h-3 w-28" />
@@ -28,7 +42,7 @@ export function StatCardSkeleton() {
 
 export function AccountCardSkeleton() {
   return (
-    <div className="rounded-xl border border-line bg-surface p-5">
+    <div className="rounded-2xl border border-line bg-surface p-5">
       <div className="flex items-center justify-between">
         <Skeleton className="h-3 w-28" />
         <Skeleton className="h-5 w-16 rounded-full" />
