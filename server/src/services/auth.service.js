@@ -98,3 +98,58 @@ export async function setUserStatus(adminUserId, targetUserId, isActive, reason)
   });
 }
 
+/**
+ * Fetches the authenticated user's verified database profile and account memberships.
+ */
+export async function getAuthenticatedUser(userId, role) {
+  return executeWithSession(userId, role, async (client) => {
+    const userRes = await client.query(
+      'SELECT id, email, role, is_active, created_at FROM public.users WHERE id = $1',
+      [userId]
+    );
+
+    if (userRes.rowCount === 0) {
+      const err = new Error('Authenticated user not found');
+      err.status = 404;
+      throw err;
+    }
+
+    const memRes = await client.query(
+      `SELECT am.account_id,
+              a.account_number,
+              a.status AS account_status,
+              am.role AS membership_role
+         FROM public.account_memberships am
+         JOIN public.accounts a ON a.id = am.account_id
+        WHERE am.user_id = $1
+        ORDER BY am.created_at ASC`,
+      [userId]
+    );
+
+    return {
+      user: userRes.rows[0],
+      memberships: memRes.rows,
+    };
+  });
+}
+
+/**
+ * Lists registered users for Admin membership assignment under PostgreSQL RLS.
+ */
+export async function listUsers(adminUserId, adminRole) {
+  if (adminRole !== 'admin') {
+    const err = new Error('Only administrators can list registered users');
+    err.status = 403;
+    throw err;
+  }
+
+  return executeWithSession(adminUserId, adminRole, async (client) => {
+    const res = await client.query(
+      `SELECT id, email, role, is_active, created_at
+         FROM public.users
+        ORDER BY is_active DESC, email ASC`
+    );
+    return res.rows;
+  });
+}
+

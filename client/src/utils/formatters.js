@@ -370,3 +370,27 @@ export function transitionReversalState(currentState, action) {
       return currentState;
   }
 }
+
+/**
+ * Determines whether the authenticated user can manage account memberships.
+ * Restricted strictly to platform administrators.
+ */
+export function canManageAccountMemberships(user) {
+  return Boolean(user && user.role === 'admin');
+}
+
+/**
+ * Determines whether an account is strictly read-only for the caller (assigned as auditor).
+ */
+export function isAccountReadOnly(user, account) {
+  return Boolean(user && user.role !== 'admin' && account && account.membership_role === 'auditor');
+}
+
+/**
+ * Determines whether the caller may initiate financial operations (deposit/withdraw/transfer) on the account.
+ */
+export function canTransactOnAccount(user, account) {
+  if (!user || !account) return false;
+  if (user.role === 'admin') return true;
+  return account.membership_role === 'account_holder';
+}

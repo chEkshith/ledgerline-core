@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
+import { useAuth } from '../context/AuthContext';
 import * as api from '../services/api';
-import { paiseToRupees, formatTimestamp } from '../utils/formatters';
+import { paiseToRupees, formatTimestamp, isAccountReadOnly, canTransactOnAccount } from '../utils/formatters';
 import {
   Wallet,
   PlusCircle,
@@ -14,6 +15,7 @@ import {
   ArrowLeftRight,
   Layers,
   CircleDollarSign,
+  Users,
 } from 'lucide-react';
 import Alert from '../components/Alert';
 import Modal from '../components/Modal';
@@ -37,6 +39,7 @@ import {
 } from '../components/ui';
 
 export default function Accounts() {
+  const { user, isAdmin } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
   const toast = useToast();
 
@@ -337,10 +340,16 @@ export default function Accounts() {
                             )}
                           </button>
                         </div>
-                        <div className="mt-1">
+                        <div className="mt-1 flex flex-wrap items-center gap-1.5">
                           <Badge variant={isSystem ? 'info' : 'neutral'} className="capitalize">
                             {typeLabel}
                           </Badge>
+                          {!isSystem && isAccountReadOnly(user, acc) && (
+                            <Badge variant="warning">Auditor · Read-only</Badge>
+                          )}
+                          {!isSystem && !isAccountReadOnly(user, acc) && acc.membership_role === 'account_holder' && (
+                            <Badge variant="success">Account holder</Badge>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -375,22 +384,36 @@ export default function Accounts() {
                 </CardBody>
 
                 <CardFooter className="justify-between gap-2">
-                  <Link
-                    to={`/accounts/${acc.id}`}
-                    className="inline-flex items-center gap-1 text-xs font-semibold text-brand hover:underline"
-                  >
-                    Statement <ExternalLink className="h-3 w-3" aria-hidden="true" />
-                  </Link>
+                  <div className="flex items-center gap-3">
+                    <Link
+                      to={`/accounts/${acc.id}`}
+                      className="inline-flex items-center gap-1 text-xs font-semibold text-brand hover:underline"
+                    >
+                      Statement <ExternalLink className="h-3 w-3" aria-hidden="true" />
+                    </Link>
 
-                  <ButtonLink
-                    to={`/operations?type=transfer&source=${acc.id}`}
-                    variant="secondary"
-                    size="xs"
-                    className="gap-1.5"
-                  >
-                    <ArrowLeftRight className="h-3 w-3" aria-hidden="true" />
-                    Transfer
-                  </ButtonLink>
+                    {isAdmin && !isSystem && (
+                      <Link
+                        to={`/accounts/${acc.id}?tab=memberships`}
+                        className="inline-flex items-center gap-1 text-xs font-semibold text-ink-soft hover:text-brand hover:underline"
+                      >
+                        <Users className="h-3 w-3" aria-hidden="true" />
+                        Memberships
+                      </Link>
+                    )}
+                  </div>
+
+                  {!isSystem && canTransactOnAccount(user, acc) && (
+                    <ButtonLink
+                      to={`/operations?type=transfer&source=${acc.id}`}
+                      variant="secondary"
+                      size="xs"
+                      className="gap-1.5"
+                    >
+                      <ArrowLeftRight className="h-3 w-3" aria-hidden="true" />
+                      Transfer
+                    </ButtonLink>
+                  )}
                 </CardFooter>
               </Card>
             );

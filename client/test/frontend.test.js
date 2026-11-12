@@ -8,6 +8,9 @@ import {
   verifyLedgerPostings,
   bigIntAbs,
   transitionReversalState,
+  canManageAccountMemberships,
+  isAccountReadOnly,
+  canTransactOnAccount,
 } from '../src/utils/formatters.js';
 import * as api from '../src/services/api.js';
 
@@ -734,5 +737,97 @@ describe('LedgerLine Administrative Reversal Idempotency Lifecycle Suite', () =>
     assert.notEqual(successOp.idempotencyKey, initialKey, 'Settlement success must rotate idempotency key');
     assert.equal(successOp.submittedPayload, null);
     assert.equal(successOp.isFailedRetry, false);
+  });
+});
+
+describe('LedgerLine Account Membership & Auditor Read-Only UI Controls', () => {
+  const originalFetch = globalThis.fetch;
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+    api.clearAuthStorage();
+  });
+
+  it('enforces admin-only membership management and auditor read-only restrictions in UI helpers', () => {
+    const adminUser = { id: 'admin-1', role: 'admin' };
+    const customerUser = { id: 'cust-1', role: 'customer' };
+
+    const holderAccount = { id: 'acc-1', account_type: 'customer', membership_role: 'account_holder' };
+    const auditedAccount = { id: 'acc-2', account_type: 'customer', membership_role: 'auditor' };
+    const adminReadAccount = { id: 'acc-3', account_type: 'customer', membership_role: null };
+
+    assert.equal(canManageAccountMemberships(adminUser), true);
+    assert.equal(canManageAccountMemberships(customerUser), false);
+    assert.equal(canManageAccountMemberships(null), false);
+
+    assert.equal(isAccountReadOnly(customerUser, auditedAccount), true);
+    assert.equal(isAccountReadOnly(customerUser, holderAccount), false);
+    assert.equal(isAccountReadOnly(adminUser, auditedAccount), false);
+
+    assert.equal(canTransactOnAccount(customerUser, auditedAccount), false);
+    assert.equal(canTransactOnAccount(customerUser, holderAccount), true);
+    assert.equal(canTransactOnAccount(adminUser, adminReadAccount), true);
+  });
+
+  it('extracts nested Express errorHandler messages cleanly without [object Object]', async () => {
+    globalThis.fetch = async () => ({
+      ok: false,
+      status: 403,
+      headers: new Headers({ 'content-type': 'application/json' }),
+      json: async () => ({
+        success: false,
+        error: { message: 'Caller is not an active account_holder on transfer source account' },
+      }),
+    });
+
+    await assert.rejects(
+      async () => {
+        await api.executeTransaction({
+          type: 'transfer',
+          amountPaise: '1000',
+          sourceAccountId: 'acc-1',
+          destinationAccountId: 'acc-2',
+          idempotencyKey: 'k-auditor',
+        });
+      },
+      (err) =>
+        err.status === 403 &&
+        err.message === 'Caller is not an active account_holder on transfer source account'
+    );
+  });
+
+  it('fetches registered users and account memberships with bearer token authorization', async () => {
+    api.setStoredToken('admin-jwt-token');
+    const calls = [];
+
+    globalThis.fetch = async (url, options) => {
+      calls.push({ url, method: options.method, auth: options.headers.get('Authorization') });
+      if (url.endsWith('/api/users')) {
+        return {
+          ok: true,
+          status: 200,
+          headers: new Headers({ 'content-type': 'application/json' }),
+          json: async () => ({ users: [{ id: 'u1', email: 'auditor1@ledgerline.com', role: 'customer', is_active: true }] }),
+        };
+      }
+      return {
+        ok: true,
+        status: 200,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: async () => ({
+          account: { id: 'acc-1', account_number: 'ACC-1' },
+          memberships: [{ id: 'm1', user_id: 'u1', email: 'auditor1@ledgerline.com', role: 'auditor' }],
+        }),
+      };
+    };
+
+    const users = await api.listUsers();
+    const memRes = await api.listAccountMemberships('acc-1');
+
+    assert.equal(users.length, 1);
+    assert.equal(users[0].email, 'auditor1@ledgerline.com');
+    assert.equal(memRes.memberships[0].role, 'auditor');
+    assert.equal(calls[0].auth, 'Bearer admin-jwt-token');
+    assert.equal(calls[1].url, '/api/accounts/acc-1/memberships');
   });
 });

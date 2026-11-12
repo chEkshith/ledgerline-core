@@ -32,6 +32,20 @@ export async function updateStatus(req, res, next) {
   }
 }
 
+export async function listMemberships(req, res, next) {
+  try {
+    const { id } = req.params;
+    const result = await accountService.listAccountMemberships(
+      req.user.id,
+      req.user.role,
+      id
+    );
+    res.status(200).json(result);
+  } catch (err) {
+    next(err);
+  }
+}
+
 export async function assignMembership(req, res, next) {
   try {
     const { id } = req.params;

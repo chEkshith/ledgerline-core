@@ -161,7 +161,11 @@ async function request(endpoint, options = {}) {
   }
 
   if (!response.ok) {
-    const message = (data && (data.message || data.error)) || `Request failed with status ${response.status}`;
+    const extractedError =
+      data &&
+      (data.message ||
+        (typeof data.error === 'string' ? data.error : data.error?.message));
+    const message = extractedError || `Request failed with status ${response.status}`;
     const error = new Error(message);
     error.status = response.status;
     error.data = data;
@@ -212,6 +216,16 @@ export async function setUserStatus(targetUserId, isActive, reason) {
   return res.data;
 }
 
+export async function getCurrentUser() {
+  const res = await request('/api/auth/me', { method: 'GET' });
+  return res.data;
+}
+
+export async function listUsers() {
+  const res = await request('/api/users', { method: 'GET' });
+  return res.data?.users || [];
+}
+
 // -----------------------------------------------------------------------------
 // Account Management Endpoints
 // -----------------------------------------------------------------------------
@@ -245,6 +259,13 @@ export async function updateAccountStatus(accountId, status, reason) {
   const res = await request(`/api/accounts/${accountId}/status`, {
     method: 'PATCH',
     body: JSON.stringify({ status, reason }),
+  });
+  return res.data;
+}
+
+export async function listAccountMemberships(accountId) {
+  const res = await request(`/api/accounts/${accountId}/memberships`, {
+    method: 'GET',
   });
   return res.data;
 }

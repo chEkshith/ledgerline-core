@@ -49,7 +49,74 @@ export async function assignMembership(userId, role, accountId, targetUserId, me
       'SELECT public.assign_account_membership($1, $2, $3)',
       [accountId, targetUserId, memberRole]
     );
+
+    // After assign_account_membership acquires the parent account FOR UPDATE lock,
+    // verify before COMMIT that downgrading to auditor does not leave zero holders.
+    if (memberRole === 'auditor') {
+      const holderRes = await client.query(
+        `SELECT COUNT(*)::int AS holder_count
+           FROM public.account_memberships
+          WHERE account_id = $1
+            AND role = 'account_holder'`,
+        [accountId]
+      );
+      if ((holderRes.rows[0]?.holder_count ?? 0) < 1) {
+        const err = new Error('Cannot downgrade the final account_holder of this account to auditor');
+        err.status = 400;
+        err.isOperational = true;
+        throw err;
+      }
+    }
+
     return { success: true, accountId, targetUserId, role: memberRole };
+  });
+}
+
+export async function listAccountMemberships(userId, role, accountId) {
+  if (role !== 'admin') {
+    const err = new Error('Only administrators can manage or view account memberships');
+    err.status = 403;
+    throw err;
+  }
+
+  if (!accountId) {
+    const err = new Error('Valid accountId is required');
+    err.status = 400;
+    throw err;
+  }
+
+  return executeWithSession(userId, role, async (client) => {
+    const accRes = await client.query(
+      'SELECT id, account_number, account_type, status FROM public.accounts WHERE id = $1',
+      [accountId]
+    );
+    if (accRes.rowCount === 0) {
+      const err = new Error('Account not found or access denied');
+      err.status = 404;
+      throw err;
+    }
+
+    const memRes = await client.query(
+      `SELECT am.id,
+              am.account_id,
+              am.user_id,
+              u.email,
+              u.role AS user_role,
+              u.is_active AS user_is_active,
+              am.role,
+              am.created_at,
+              am.updated_at
+         FROM public.account_memberships am
+         JOIN public.users u ON u.id = am.user_id
+        WHERE am.account_id = $1
+        ORDER BY CASE WHEN am.role = 'account_holder' THEN 0 ELSE 1 END, u.email ASC`,
+      [accountId]
+    );
+
+    return {
+      account: accRes.rows[0],
+      memberships: memRes.rows,
+    };
   });
 }
 
@@ -72,8 +139,20 @@ export async function revokeMembership(userId, role, accountId, targetUserId) {
 export async function getAccountDetails(userId, role, accountId) {
   return executeWithSession(userId, role, async (client) => {
     const res = await client.query(
-      'SELECT id, account_number, account_type, system_role_type, currency, status, current_balance, created_at FROM public.accounts WHERE id = $1',
-      [accountId]
+      `SELECT a.id,
+              a.account_number,
+              a.account_type,
+              a.system_role_type,
+              a.currency,
+              a.status,
+              a.current_balance,
+              a.created_at,
+              am.role AS membership_role
+         FROM public.accounts a
+         LEFT JOIN public.account_memberships am
+           ON am.account_id = a.id AND am.user_id = $2
+        WHERE a.id = $1`,
+      [accountId, userId]
     );
     if (res.rowCount === 0) {
       const err = new Error('Account not found or access denied');
@@ -87,7 +166,20 @@ export async function getAccountDetails(userId, role, accountId) {
 export async function listUserAccounts(userId, role) {
   return executeWithSession(userId, role, async (client) => {
     const res = await client.query(
-      'SELECT id, account_number, account_type, system_role_type, currency, status, current_balance, created_at FROM public.accounts ORDER BY created_at ASC'
+      `SELECT a.id,
+              a.account_number,
+              a.account_type,
+              a.system_role_type,
+              a.currency,
+              a.status,
+              a.current_balance,
+              a.created_at,
+              am.role AS membership_role
+         FROM public.accounts a
+         LEFT JOIN public.account_memberships am
+           ON am.account_id = a.id AND am.user_id = $1
+        ORDER BY a.created_at ASC`,
+      [userId]
     );
     return res.rows;
   });
@@ -104,10 +196,19 @@ export async function getAccountStatement(userId, role, accountId, limit = 20, o
   return executeWithSession(userId, role, async (client) => {
     // 1. Fetch account under RLS (non-members get 0 rows -> 404)
     const accRes = await client.query(
-      `SELECT id, account_number, account_type, currency, status, current_balance, created_at
-         FROM public.accounts
-        WHERE id = $1`,
-      [accountId]
+      `SELECT a.id,
+              a.account_number,
+              a.account_type,
+              a.currency,
+              a.status,
+              a.current_balance,
+              a.created_at,
+              am.role AS membership_role
+         FROM public.accounts a
+         LEFT JOIN public.account_memberships am
+           ON am.account_id = a.id AND am.user_id = $2
+        WHERE a.id = $1`,
+      [accountId, userId]
     );
 
     if (accRes.rowCount === 0) {

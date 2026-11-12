@@ -1,11 +1,13 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useSearchParams, Link } from 'react-router-dom';
+import { useAuth } from '../context/AuthContext';
 import * as api from '../services/api';
 import {
   rupeesToPaise,
   paiseToRupees,
   generateIdempotencyKey,
   formatTimestamp,
+  canTransactOnAccount,
 } from '../utils/formatters';
 import {
   ArrowLeftRight,
@@ -77,6 +79,7 @@ function labelForType(type) {
 }
 
 export default function Operations() {
+  const { user, isAdmin } = useAuth();
   const toast = useToast();
   const [searchParams, setSearchParams] = useSearchParams();
 
@@ -116,18 +119,20 @@ export default function Operations() {
   useEffect(() => {
     if (!accounts.length) return;
     const vault = accounts.find((account) => account.system_role_type === 'SYSTEM_CASH_VAULT');
-    const firstCustomer = accounts.find((account) => account.account_type === 'customer');
+    const firstOperable = accounts.find(
+      (account) => account.account_type === 'customer' && canTransactOnAccount(user, account)
+    );
 
     if (operationType === 'deposit') {
       if (vault) setSourceAccountId(vault.id);
-      setDestinationAccountId((current) => current || firstCustomer?.id || '');
+      setDestinationAccountId((current) => current || firstOperable?.id || '');
     } else if (operationType === 'withdraw') {
-      setSourceAccountId((current) => current || firstCustomer?.id || '');
+      setSourceAccountId((current) => current || firstOperable?.id || '');
       if (vault) setDestinationAccountId(vault.id);
     } else if (operationType === 'transfer') {
-      setSourceAccountId((current) => current || firstCustomer?.id || '');
+      setSourceAccountId((current) => current || firstOperable?.id || '');
     }
-  }, [accounts, operationType]);
+  }, [accounts, operationType, user]);
 
   function handleTypeChange(type) {
     setOperationType(type);
@@ -138,16 +143,18 @@ export default function Operations() {
     setSearchParams({ type });
 
     const vault = accounts.find((account) => account.system_role_type === 'SYSTEM_CASH_VAULT');
-    const firstCustomer = accounts.find((account) => account.account_type === 'customer');
+    const firstOperable = accounts.find(
+      (account) => account.account_type === 'customer' && canTransactOnAccount(user, account)
+    );
 
     if (type === 'deposit') {
       if (vault) setSourceAccountId(vault.id);
-      setDestinationAccountId(firstCustomer?.id || '');
+      setDestinationAccountId(firstOperable?.id || '');
     } else if (type === 'withdraw') {
-      setSourceAccountId(firstCustomer?.id || '');
+      setSourceAccountId(firstOperable?.id || '');
       setDestinationAccountId(vault?.id || '');
     } else if (type === 'transfer') {
-      setSourceAccountId(firstCustomer?.id || '');
+      setSourceAccountId(firstOperable?.id || '');
       setDestinationAccountId('');
     }
   }
@@ -269,6 +276,11 @@ export default function Operations() {
   }
 
   const customerAccounts = accounts.filter((account) => account.account_type === 'customer');
+  const operableCustomerAccounts = customerAccounts.filter((account) =>
+    canTransactOnAccount(user, account)
+  );
+  const hasOnlyReadOnlyAuditorAccounts =
+    !isAdmin && customerAccounts.length > 0 && operableCustomerAccounts.length === 0;
   const vaultAccount = accounts.find((account) => account.system_role_type === 'SYSTEM_CASH_VAULT');
   const meta = operationMeta[operationType] || operationMeta.transfer;
 
@@ -293,6 +305,13 @@ export default function Operations() {
       />
 
       {error && <Alert type="error" message={error} onClose={() => setError(null)} />}
+
+      {hasOnlyReadOnlyAuditorAccounts && (
+        <Alert
+          type="warning"
+          message="Your accessible customer accounts grant read-only auditor access. You can inspect account statements, while deposits, withdrawals, and transfers require account_holder or admin privileges."
+        />
+      )}
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         {Object.entries(operationMeta).map(([type, item]) => {
@@ -363,7 +382,7 @@ export default function Operations() {
                     onChange={(event) => setSourceAccountId(event.target.value)}
                   >
                     <option value="">Select source account…</option>
-                    {customerAccounts.map((account) => (
+                    {operableCustomerAccounts.map((account) => (
                       <option key={account.id} value={account.id}>
                         {account.account_number} · {paiseToRupees(account.current_balance)} · {account.status}
                       </option>
@@ -391,7 +410,7 @@ export default function Operations() {
                       onChange={(event) => setDestinationAccountId(event.target.value)}
                     >
                       <option value="">Select destination account…</option>
-                      {customerAccounts
+                      {(operationType === 'deposit' ? operableCustomerAccounts : customerAccounts)
                         .filter((account) => account.id !== sourceAccountId)
                         .map((account) => (
                           <option key={account.id} value={account.id}>
@@ -450,7 +469,12 @@ export default function Operations() {
                 </div>
               </div>
 
-              <Button type="submit" size="lg" className="w-full" disabled={submitting || replaying}>
+              <Button
+                type="submit"
+                size="lg"
+                className="w-full"
+                disabled={submitting || replaying || hasOnlyReadOnlyAuditorAccounts}
+              >
                 <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
                 Review {meta.label.toLowerCase()}
               </Button>

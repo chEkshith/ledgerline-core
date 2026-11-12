@@ -30,3 +30,21 @@ export async function setStatus(req, res, next) {
   }
 }
 
+export async function getMe(req, res, next) {
+  try {
+    const result = await authService.getAuthenticatedUser(req.user.id, req.user.role);
+    res.status(200).json(result);
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function listUsers(req, res, next) {
+  try {
+    const users = await authService.listUsers(req.user.id, req.user.role);
+    res.status(200).json({ users });
+  } catch (err) {
+    next(err);
+  }
+}
+

@@ -1,7 +1,9 @@
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
+import http from 'node:http';
 import pkg from 'pg';
 const { Client } = pkg;
+import app from '../src/app.js';
 import { pool, query } from '../src/config/db.js';
 import { env } from '../src/config/env.js';
 import { buildAdminDbConfig } from '../src/config/dbConfig.js';
@@ -21,7 +23,7 @@ import {
   validateAmountPaise,
 } from '../src/services/transaction.service.js';
 import { executeWithSession } from '../src/utils/sessionContext.js';
-import { generateHmacAssertion, hashPassword } from '../src/utils/crypto.js';
+import { generateHmacAssertion, hashPassword, signJwt } from '../src/utils/crypto.js';
 
 describe('LedgerLine Phase 2 Comprehensive Test Suite', () => {
   let adminUser;
@@ -3323,5 +3325,228 @@ describe('LedgerLine Phase 2 Comprehensive Test Suite', () => {
       WHERE k.status = 'resolved' AND (k.transaction_id IS NULL OR t.id IS NULL)
     `);
     assert.equal(parseInt(resolvedCheck.rows[0].count, 10), 0, 'All resolved idempotency keys must reference valid transactions');
+  });
+
+  // ---------------------------------------------------------------------------
+  // Helper for HTTP route / middleware integration verification (Tests 59-62)
+  // ---------------------------------------------------------------------------
+  async function withTestHttpServer(fn) {
+    const server = http.createServer(app);
+    await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const { port } = server.address();
+    const baseUrl = `http://127.0.0.1:${port}`;
+
+    async function callApi(method, reqPath, { token, body, headers = {} } = {}) {
+      const reqHeaders = { Accept: 'application/json', ...headers };
+      if (body !== undefined) {
+        reqHeaders['Content-Type'] = 'application/json';
+      }
+      if (token) {
+        reqHeaders.Authorization = `Bearer ${token}`;
+      }
+      const res = await fetch(`${baseUrl}${reqPath}`, {
+        method,
+        headers: reqHeaders,
+        ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+      });
+      const data = await res.json().catch(() => null);
+      return { status: res.status, data };
+    }
+
+    try {
+      return await fn(callApi);
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // 59. HTTP Auth / Users Routes: GET /api/auth/me & Admin-Only GET /api/users
+  // ---------------------------------------------------------------------------
+  it('59. HTTP Auth & Users Endpoints: /api/auth/me returns caller context and /api/users is strictly Admin-only', async () => {
+    const adminToken = signJwt({ id: adminUser.id, email: adminUser.email, role: 'admin' }, env.JWT_SECRET);
+    const custToken = signJwt({ id: customerA.id, email: customerA.email, role: 'customer' }, env.JWT_SECRET);
+    const audToken = signJwt({ id: auditorUser.id, email: auditorUser.email, role: 'customer' }, env.JWT_SECRET);
+
+    await withTestHttpServer(async (callApi) => {
+      // Unauthenticated request rejected with 401
+      const unauthMe = await callApi('GET', '/api/auth/me');
+      assert.equal(unauthMe.status, 401);
+
+      // Customer /api/auth/me returns live profile & memberships
+      const custMe = await callApi('GET', '/api/auth/me', { token: custToken });
+      assert.equal(custMe.status, 200);
+      assert.equal(custMe.data.user.id, customerA.id);
+      assert.equal(custMe.data.user.email, customerA.email);
+      assert.equal(custMe.data.user.role, 'customer');
+      assert.ok(Array.isArray(custMe.data.memberships));
+      assert.ok(custMe.data.memberships.some((m) => m.account_id === accountA && m.membership_role === 'account_holder'));
+
+      // Non-admin customers & auditors rejected with 403 on GET /api/users
+      const custUsers = await callApi('GET', '/api/users', { token: custToken });
+      assert.equal(custUsers.status, 403);
+
+      const audUsers = await callApi('GET', '/api/users', { token: audToken });
+      assert.equal(audUsers.status, 403);
+
+      // Admin permitted on GET /api/users with zero password_hash exposure
+      const adminUsers = await callApi('GET', '/api/users', { token: adminToken });
+      assert.equal(adminUsers.status, 200);
+      assert.ok(Array.isArray(adminUsers.data.users));
+      assert.ok(adminUsers.data.users.some((u) => u.id === auditorUser.id && u.email === auditorUser.email));
+      assert.ok(adminUsers.data.users.every((u) => u.password_hash === undefined));
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // 60. HTTP Account Membership Lifecycle: Admin Assign, List, Change Role, Final Holder Guard & Revoke
+  // ---------------------------------------------------------------------------
+  it('60. HTTP Membership Lifecycle: Admin assigns auditor/holder, lists emails, changes roles, and revokes safely', async () => {
+    const unique60 = Date.now() + 60;
+    const holderReg = await registerCustomer(`holder60_${unique60}@test.local`, 'Password123!');
+    const audReg = await registerCustomer(`auditor60_${unique60}@test.local`, 'Password123!');
+    const accRes = await createCustomerAccount(holderReg.user.id, 'customer', `ACC-MEM-${unique60}`);
+    const testAccId = accRes.accountId;
+
+    const adminToken = signJwt({ id: adminUser.id, email: adminUser.email, role: 'admin' }, env.JWT_SECRET);
+
+    await withTestHttpServer(async (callApi) => {
+      // 1. Admin assigns audReg as auditor
+      const assignAud = await callApi('POST', `/api/accounts/${testAccId}/memberships`, {
+        token: adminToken,
+        body: { targetUserId: audReg.user.id, role: 'auditor' },
+      });
+      assert.equal(assignAud.status, 200);
+      assert.equal(assignAud.data.role, 'auditor');
+
+      // 2. Admin lists memberships and verifies emails & roles
+      const list1 = await callApi('GET', `/api/accounts/${testAccId}/memberships`, { token: adminToken });
+      assert.equal(list1.status, 200);
+      assert.equal(list1.data.memberships.length, 2);
+      const listedAud = list1.data.memberships.find((m) => m.user_id === audReg.user.id);
+      assert.equal(listedAud?.email, audReg.user.email);
+      assert.equal(listedAud?.role, 'auditor');
+
+      // 3. Admin upgrades audReg to account_holder
+      const upgradeRes = await callApi('POST', `/api/accounts/${testAccId}/memberships`, {
+        token: adminToken,
+        body: { targetUserId: audReg.user.id, role: 'account_holder' },
+      });
+      assert.equal(upgradeRes.status, 200);
+      assert.equal(upgradeRes.data.role, 'account_holder');
+
+      // 4. Admin revokes audReg cleanly while holderReg remains
+      const revokeSecondary = await callApi('DELETE', `/api/accounts/${testAccId}/memberships/${audReg.user.id}`, {
+        token: adminToken,
+      });
+      assert.equal(revokeSecondary.status, 200);
+
+      // 5. Attempting to downgrade or revoke the sole remaining account_holder must fail (400)
+      const downgradeLast = await callApi('POST', `/api/accounts/${testAccId}/memberships`, {
+        token: adminToken,
+        body: { targetUserId: holderReg.user.id, role: 'auditor' },
+      });
+      assert.equal(downgradeLast.status, 400);
+
+      const revokeLast = await callApi('DELETE', `/api/accounts/${testAccId}/memberships/${holderReg.user.id}`, {
+        token: adminToken,
+      });
+      assert.equal(revokeLast.status, 400);
+
+      const listFinal = await callApi('GET', `/api/accounts/${testAccId}/memberships`, { token: adminToken });
+      assert.equal(listFinal.status, 200);
+      assert.equal(listFinal.data.memberships.length, 1);
+      assert.equal(listFinal.data.memberships[0].user_id, holderReg.user.id);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // 61. HTTP Unauthorized Membership Access: Non-Admin Customers & Auditors Denied (403)
+  // ---------------------------------------------------------------------------
+  it('61. HTTP Unauthorized Membership Denial: Customers and Auditors receive 403 on all membership endpoints', async () => {
+    const custToken = signJwt({ id: customerA.id, email: customerA.email, role: 'customer' }, env.JWT_SECRET);
+    const audToken = signJwt({ id: auditorUser.id, email: auditorUser.email, role: 'customer' }, env.JWT_SECRET);
+
+    await withTestHttpServer(async (callApi) => {
+      for (const callerToken of [custToken, audToken]) {
+        const listRes = await callApi('GET', `/api/accounts/${accountA}/memberships`, { token: callerToken });
+        assert.equal(listRes.status, 403);
+
+        const assignRes = await callApi('POST', `/api/accounts/${accountA}/memberships`, {
+          token: callerToken,
+          body: { targetUserId: userC.id, role: 'auditor' },
+        });
+        assert.equal(assignRes.status, 403);
+
+        const revokeRes = await callApi('DELETE', `/api/accounts/${accountA}/memberships/${auditorUser.id}`, {
+          token: callerToken,
+        });
+        assert.equal(revokeRes.status, 403);
+      }
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // 62. HTTP Auditor Read-Only Enforcement Across Accounts, Statements, Status & Money Movement
+  // ---------------------------------------------------------------------------
+  it('62. HTTP Auditor Read-Only Matrix: Auditor can read assigned account & statement, but all mutations return 403', async () => {
+    const unique62 = Date.now() + 62;
+    const audToken = signJwt({ id: auditorUser.id, email: auditorUser.email, role: 'customer' }, env.JWT_SECRET);
+
+    await withTestHttpServer(async (callApi) => {
+      // 1. Read permissions on assigned accountA
+      const listAcc = await callApi('GET', '/api/accounts', { token: audToken });
+      assert.equal(listAcc.status, 200);
+      const assignedAcc = listAcc.data.find((a) => a.id === accountA);
+      assert.equal(assignedAcc?.membership_role, 'auditor');
+
+      const detailAcc = await callApi('GET', `/api/accounts/${accountA}`, { token: audToken });
+      assert.equal(detailAcc.status, 200);
+      assert.equal(detailAcc.data.membership_role, 'auditor');
+
+      const stmtAcc = await callApi('GET', `/api/accounts/${accountA}/statement`, { token: audToken });
+      assert.equal(stmtAcc.status, 200);
+      assert.equal(stmtAcc.data.account.membership_role, 'auditor');
+
+      // 2. Write & mutation attempts must all be rejected with HTTP 403
+      const depRes = await callApi('POST', '/api/transactions/deposit', {
+        token: audToken,
+        headers: { 'Idempotency-Key': `http-aud-dep-${unique62}` },
+        body: {
+          amountPaise: '1000',
+          sourceAccountId: vaultAccount.id,
+          destinationAccountId: accountA,
+        },
+      });
+      assert.equal(depRes.status, 403);
+
+      const wdRes = await callApi('POST', '/api/transactions/withdraw', {
+        token: audToken,
+        headers: { 'Idempotency-Key': `http-aud-wd-${unique62}` },
+        body: {
+          amountPaise: '1000',
+          sourceAccountId: accountA,
+          destinationAccountId: vaultAccount.id,
+        },
+      });
+      assert.equal(wdRes.status, 403);
+
+      const tfRes = await callApi('POST', '/api/transactions/transfer', {
+        token: audToken,
+        headers: { 'Idempotency-Key': `http-aud-tf-${unique62}` },
+        body: {
+          amountPaise: '1000',
+          sourceAccountId: accountA,
+          destinationAccountId: accountB,
+        },
+      });
+      assert.equal(tfRes.status, 403);
+
+      const statusRes = await callApi('PATCH', `/api/accounts/${accountA}/status`, {
+        token: audToken,
+        body: { status: 'frozen', reason: 'Auditor unauthorized attempt' },
+      });
+      assert.equal(statusRes.status, 403);
+    });
   });
 });
