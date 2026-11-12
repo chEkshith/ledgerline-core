@@ -1,14 +1,37 @@
 import React, { useState } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { Lock, Mail, ArrowRight, User } from 'lucide-react';
+import { Lock, Mail, ArrowRight, User, ShieldCheck, Eye } from 'lucide-react';
 import AuthLayout from '../components/AuthLayout';
 import Alert from '../components/Alert';
 import { Button, Field, Input, PasswordInput } from '../components/ui';
+import { DEMO_ACCOUNTS } from '../utils/demoAccounts';
+
+const demoStyleByRole = {
+  admin: {
+    icon: ShieldCheck,
+    cardClass:
+      'border-warning/30 bg-warning-soft/40 hover:border-warning/60 hover:bg-warning-soft/75',
+    badgeClass: 'bg-warning-soft text-warning ring-warning/20',
+  },
+  auditor: {
+    icon: Eye,
+    cardClass:
+      'border-accent/30 bg-accent-soft/40 hover:border-accent/60 hover:bg-accent-soft/75',
+    badgeClass: 'bg-accent-soft text-accent ring-accent/20',
+  },
+  customer: {
+    icon: User,
+    cardClass:
+      'border-brand/30 bg-brand-soft/50 hover:border-brand/60 hover:bg-brand-soft/85',
+    badgeClass: 'bg-brand-soft text-brand ring-brand/20',
+  },
+};
 
 export default function Login() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [selectedDemoId, setSelectedDemoId] = useState(null);
   const [fieldErrors, setFieldErrors] = useState({});
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -45,10 +68,13 @@ export default function Login() {
     }
   }
 
-  function handlePrefillEmail(sampleEmail) {
-    setEmail(sampleEmail);
-    setFieldErrors((current) => ({ ...current, email: undefined }));
+  function handleQuickFillDemo(account) {
+    setEmail(account.email);
+    setPassword(account.password);
+    setSelectedDemoId(account.id);
+    setFieldErrors({});
     setError(null);
+    setAuthError(null);
   }
 
   return (
@@ -90,6 +116,7 @@ export default function Login() {
               value={email}
               onChange={(event) => {
                 setEmail(event.target.value);
+                if (selectedDemoId) setSelectedDemoId(null);
                 if (fieldErrors.email) setFieldErrors((current) => ({ ...current, email: undefined }));
               }}
               placeholder="you@company.com"
@@ -106,6 +133,7 @@ export default function Login() {
               value={password}
               onChange={(event) => {
                 setPassword(event.target.value);
+                if (selectedDemoId) setSelectedDemoId(null);
                 if (fieldErrors.password) setFieldErrors((current) => ({ ...current, password: undefined }));
               }}
               placeholder="Enter your password"
@@ -122,21 +150,57 @@ export default function Login() {
           </Button>
         </form>
 
-        {import.meta.env.DEV && (
-          <div className="mt-5 rounded-xl border border-line bg-paper p-3">
-            <div className="mb-2 text-[9px] font-semibold uppercase tracking-[0.16em] text-muted">
-              Development helper · email pre-fill only
-            </div>
-            <button
-              type="button"
-              onClick={() => handlePrefillEmail('customerA@test.local')}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-surface px-2.5 py-1.5 text-[11px] font-medium text-ink-soft transition-colors hover:border-brand/30 hover:bg-brand-soft"
-            >
-              <User className="h-3 w-3 text-brand" aria-hidden="true" />
-              customerA@test.local
-            </button>
+        <section
+          aria-label="Quick Demo Login"
+          className="mt-5 rounded-xl border border-line bg-paper p-3.5"
+        >
+          <div className="flex items-center justify-between gap-2">
+            <h2 className="text-[11px] font-semibold uppercase tracking-[0.14em] text-ink">
+              Quick Demo Login
+            </h2>
+            {selectedDemoId && (
+              <span className="text-[10px] font-medium text-brand">
+                Filled · Click Sign in
+              </span>
+            )}
           </div>
-        )}
+          <p className="mt-1 text-[11px] leading-relaxed text-muted">
+            Demo accounts — use these credentials to explore role-based features.
+          </p>
+
+          <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-3">
+            {DEMO_ACCOUNTS.map((demoAccount) => {
+              const style = demoStyleByRole[demoAccount.id] || demoStyleByRole.customer;
+              const Icon = style.icon;
+              const selected = selectedDemoId === demoAccount.id;
+
+              return (
+                <button
+                  key={demoAccount.id}
+                  type="button"
+                  onClick={() => handleQuickFillDemo(demoAccount)}
+                  aria-pressed={selected}
+                  className={`flex flex-col items-start rounded-lg border px-2.5 py-2 text-left transition-all ${style.cardClass} ${
+                    selected ? 'ring-2 ring-brand/40 shadow-sm' : ''
+                  }`}
+                >
+                  <span className="flex w-full items-center justify-between gap-1.5">
+                    <span className="text-xs font-semibold text-ink">{demoAccount.role}</span>
+                    <span
+                      className={`inline-flex h-5 w-5 items-center justify-center rounded-md ring-1 ${style.badgeClass}`}
+                    >
+                      <Icon className="h-3 w-3" aria-hidden="true" />
+                    </span>
+                  </span>
+                  <span className="mt-1 w-full truncate font-mono text-[10px] text-ink-soft" title={demoAccount.email}>
+                    {demoAccount.email}
+                  </span>
+                  <span className="mt-0.5 text-[10px] text-muted">{demoAccount.summary}</span>
+                </button>
+              );
+            })}
+          </div>
+        </section>
 
         <div className="mt-6 flex items-center gap-3">
           <div className="h-px flex-1 bg-line" aria-hidden="true" />

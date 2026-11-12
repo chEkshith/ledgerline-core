@@ -405,6 +405,16 @@ For deployment hardening runbooks, API specs, architecture details, and threat m
 
 A concise 5-minute presentation flow on <https://ledgerline-core.vercel.app>:
 
+### Demo Login Credentials
+
+| Role | Email | Password | Access |
+| :--- | :--- | :--- | :--- |
+| Admin | `chekshith12@gmail.com` | `ekshith1234..` | Global administration and account membership management |
+| Auditor | `auditor1@ledgerline.com` | `auditor1` | Read-only access to assigned accounts |
+| Customer | `customer@ledgerline.local` | `Customer@123!` | Normal customer account operations |
+
+> These are demo-only credentials for evaluation. Do not reuse these passwords or use these accounts for real financial data. Since this repository is public, these demo credentials are publicly visible—rotate them after evaluation.
+
 1. **Public Landing & Health (0:00 – 0:45):** Open the live Vercel landing page, highlight the double-entry verification architecture, and verify `/api/health` is `UP` (accounting for Render free-tier cold start wake-up if idle).
 2. **Registration & Login (0:45 – 1:30):** Register a customer account (or log in with a prepared demo account), noting that the JWT bearer token is stored in `sessionStorage` rather than `localStorage`.
 3. **Accounts & Multi-Member Access (1:30 – 2:30):** Open **Accounts**, create or inspect customer accounts (balances displayed in formatted INR from integer paise), and explain `account_holder` vs read-only `auditor` memberships.

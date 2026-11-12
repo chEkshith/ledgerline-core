@@ -1,5 +1,8 @@
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
   rupeesToPaise,
   paiseToRupees,
@@ -12,6 +15,7 @@ import {
   isAccountReadOnly,
   canTransactOnAccount,
 } from '../src/utils/formatters.js';
+import { DEMO_ACCOUNTS } from '../src/utils/demoAccounts.js';
 import * as api from '../src/services/api.js';
 
 describe('LedgerLine Frontend Utilities & Financial Precision Suite', () => {
@@ -829,5 +833,58 @@ describe('LedgerLine Account Membership & Auditor Read-Only UI Controls', () => 
     assert.equal(memRes.memberships[0].role, 'auditor');
     assert.equal(calls[0].auth, 'Bearer admin-jwt-token');
     assert.equal(calls[1].url, '/api/accounts/acc-1/memberships');
+  });
+});
+
+describe('LedgerLine Quick Demo Login & Documentation Credentials Verification', () => {
+  const __dirname = path.dirname(fileURLToPath(import.meta.url));
+  const loginSource = fs.readFileSync(path.resolve(__dirname, '../src/pages/Login.jsx'), 'utf8');
+  const readmeSource = fs.readFileSync(path.resolve(__dirname, '../../README.md'), 'utf8');
+
+  it('defines exact Admin, Auditor, and Customer demo quick-fill credentials without logging secrets', () => {
+    const byRole = Object.fromEntries(DEMO_ACCOUNTS.map((entry) => [entry.role, entry]));
+
+    assert.equal(DEMO_ACCOUNTS.length, 3);
+    assert.deepEqual(
+      { email: byRole.Admin?.email, password: byRole.Admin?.password },
+      { email: 'chekshith12@gmail.com', password: 'ekshith1234..' }
+    );
+    assert.deepEqual(
+      { email: byRole.Auditor?.email, password: byRole.Auditor?.password },
+      { email: 'auditor1@ledgerline.com', password: 'auditor1' }
+    );
+    assert.deepEqual(
+      { email: byRole.Customer?.email, password: byRole.Customer?.password },
+      { email: 'customer@ledgerline.local', password: 'Customer@123!' }
+    );
+  });
+
+  it('Quick Demo Login populates form inputs without auto-submitting or altering normal login flow', () => {
+    assert.match(loginSource, /Quick Demo Login/);
+    assert.match(loginSource, /Demo accounts — use these credentials to explore role-based features\./);
+    assert.match(loginSource, /function handleQuickFillDemo\(account\)/);
+    assert.match(loginSource, /type="button"/);
+
+    // Quick-fill helper must never call login() or navigate() automatically
+    const quickFillBlock = loginSource.match(/function handleQuickFillDemo\(account\)\s*\{[\s\S]*?\n\s*\}/)?.[0] || '';
+    assert.ok(quickFillBlock.includes('setEmail(account.email)'));
+    assert.ok(quickFillBlock.includes('setPassword(account.password)'));
+    assert.equal(quickFillBlock.includes('login('), false);
+    assert.equal(quickFillBlock.includes('navigate('), false);
+    assert.equal(loginSource.includes('console.log'), false);
+
+    // Normal Sign In form submission remains preserved
+    assert.match(loginSource, /await login\(email\.trim\(\), password\)/);
+  });
+
+  it('README.md documents Demo Login Credentials table for all three roles and warning note', () => {
+    assert.match(readmeSource, /### Demo Login Credentials/);
+    assert.match(readmeSource, /\|\s*Admin\s*\|\s*`chekshith12@gmail\.com`\s*\|\s*`ekshith1234\.\.`\s*\|/);
+    assert.match(readmeSource, /\|\s*Auditor\s*\|\s*`auditor1@ledgerline\.com`\s*\|\s*`auditor1`\s*\|/);
+    assert.match(readmeSource, /\|\s*Customer\s*\|\s*`customer@ledgerline\.local`\s*\|\s*`Customer@123!`\s*\|/);
+    assert.match(
+      readmeSource,
+      /These are demo-only credentials for evaluation\. Do not reuse these passwords or use these accounts for real financial data\./
+    );
   });
 });
